@@ -3,6 +3,7 @@ const net = std.net;
 const testing = std.testing;
 const shortener = @import("shortener.zig");
 const database = @import("database.zig");
+const oauth = @import("oauth.zig");
 
 pub const ServerConfig = struct {
     host: []const u8 = "127.0.0.1",
@@ -60,13 +61,17 @@ pub const RouteHandler = struct {
     config: ServerConfig,
     url_shortener: shortener.Shortener,
     db: database.Database,
+    oauth_server: oauth.OAuthServer,
 
     pub fn init(allocator: std.mem.Allocator, config: ServerConfig) !RouteHandler {
+        var db = try database.Database.init(allocator, config.db_path);
+        
         return RouteHandler{
             .allocator = allocator,
             .config = config,
             .url_shortener = shortener.Shortener.init(allocator),
-            .db = try database.Database.init(allocator, config.db_path),
+            .db = db,
+            .oauth_server = oauth.OAuthServer.init(allocator, &db),
         };
     }
     
@@ -82,7 +87,9 @@ pub const RouteHandler = struct {
         defer if (subdomain) |sub| self.allocator.free(sub);
 
         if (std.mem.eql(u8, request.method, "GET")) {
-            if (subdomain) |sub| {
+            if (std.mem.startsWith(u8, request.path, "/oauth/authorize")) {
+                try self.handleOAuthAuthorize(writer, request.path);
+            } else if (subdomain) |sub| {
                 // Subdomain request - redirect to full URL
                 try self.handleRedirect(writer, sub);
             } else {
@@ -92,6 +99,8 @@ pub const RouteHandler = struct {
         } else if (std.mem.eql(u8, request.method, "POST")) {
             if (std.mem.eql(u8, request.path, "/api/shorten")) {
                 try self.handleShorten(writer, request.body);
+            } else if (std.mem.eql(u8, request.path, "/oauth/token")) {
+                try self.handleOAuthToken(writer, request.body);
             } else {
                 try self.sendNotFound(writer);
             }
@@ -300,6 +309,247 @@ pub const RouteHandler = struct {
         const response = try std.fmt.allocPrint(self.allocator,
             "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}",
             .{ error_message.len, error_message }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
+    
+    fn handleOAuthAuthorize(self: *RouteHandler, writer: anytype, path: []const u8) !void {
+        // Parse query parameters
+        const query_start = std.mem.indexOf(u8, path, "?") orelse {
+            try self.sendBadRequest(writer, "Missing query parameters");
+            return;
+        };
+        
+        const query = path[query_start + 1..];
+        
+        const client_id = self.parseQueryValue(query, "client_id") orelse {
+            try self.sendBadRequest(writer, "Missing client_id parameter");
+            return;
+        };
+        defer self.allocator.free(client_id);
+        
+        const redirect_uri = self.parseQueryValue(query, "redirect_uri") orelse {
+            try self.sendBadRequest(writer, "Missing redirect_uri parameter");
+            return;
+        };
+        defer self.allocator.free(redirect_uri);
+        
+        const response_type = self.parseQueryValue(query, "response_type") orelse {
+            try self.sendBadRequest(writer, "Missing response_type parameter");
+            return;
+        };
+        defer self.allocator.free(response_type);
+        
+        const state = self.parseQueryValue(query, "state");
+        defer if (state) |s| self.allocator.free(s);
+        
+        // Validate client exists
+        const client = self.db.getOAuthClient(client_id) catch |err| {
+            std.debug.print("Error getting OAuth client: {}\n", .{err});
+            try self.sendInternalError(writer);
+            return;
+        };
+        
+        if (client == null) {
+            try self.sendBadRequest(writer, "Invalid client_id");
+            return;
+        }
+        
+        const client_data = client.?;
+        defer {
+            self.allocator.free(client_data.id);
+            self.allocator.free(client_data.secret);
+            self.allocator.free(client_data.name);
+            self.allocator.free(client_data.redirect_uri);
+        }
+        
+        // Validate redirect URI
+        if (!std.mem.eql(u8, client_data.redirect_uri, redirect_uri)) {
+            try self.sendBadRequest(writer, "Invalid redirect_uri");
+            return;
+        }
+        
+        const html = try std.fmt.allocPrint(self.allocator,
+            \\<!DOCTYPE html>
+            \\<html>
+            \\<head><title>Authorize {s}</title></head>
+            \\<body>
+            \\<h1>Authorize {s}</h1>
+            \\<p>The application "{s}" wants to access your Maigo account.</p>
+            \\<form method="post" action="/oauth/authorize">
+            \\<input type="hidden" name="client_id" value="{s}">
+            \\<input type="hidden" name="redirect_uri" value="{s}">
+            \\<input type="hidden" name="response_type" value="{s}">
+            \\{s}
+            \\<button type="submit" name="approve" value="true">Approve</button>
+            \\<button type="submit" name="deny" value="true">Deny</button>
+            \\</form>
+            \\</body>
+            \\</html>
+        , .{ 
+            client_data.name, 
+            client_data.name, 
+            client_data.name, 
+            client_id,
+            redirect_uri,
+            response_type,
+            if (state) |s| try std.fmt.allocPrint(self.allocator, "<input type=\"hidden\" name=\"state\" value=\"{s}\">", .{s}) else ""
+        });
+        defer self.allocator.free(html);
+        
+        if (state) |s| {
+            const state_input = try std.fmt.allocPrint(self.allocator, "<input type=\"hidden\" name=\"state\" value=\"{s}\">", .{s});
+            defer self.allocator.free(state_input);
+        }
+
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ html.len, html }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
+    
+    fn handleOAuthToken(self: *RouteHandler, writer: anytype, body: []const u8) !void {
+        std.debug.print("OAuth token request body: {s}\n", .{body});
+        
+        // Parse token request
+        const grant_type_str = self.parseFormValue(body, "grant_type") orelse {
+            try self.sendOAuthError(writer, "invalid_request", "Missing grant_type parameter");
+            return;
+        };
+        defer self.allocator.free(grant_type_str);
+        
+        const grant_type = oauth.GrantType.fromString(grant_type_str) orelse {
+            try self.sendOAuthError(writer, "unsupported_grant_type", "Unsupported grant type");
+            return;
+        };
+        
+        const client_id = self.parseFormValue(body, "client_id") orelse {
+            try self.sendOAuthError(writer, "invalid_request", "Missing client_id parameter");
+            return;
+        };
+        defer self.allocator.free(client_id);
+        
+        const client_secret = self.parseFormValue(body, "client_secret") orelse {
+            try self.sendOAuthError(writer, "invalid_request", "Missing client_secret parameter");
+            return;
+        };
+        defer self.allocator.free(client_secret);
+        
+        if (grant_type == .authorization_code) {
+            const code = self.parseFormValue(body, "code") orelse {
+                try self.sendOAuthError(writer, "invalid_request", "Missing code parameter");
+                return;
+            };
+            defer self.allocator.free(code);
+            
+            const redirect_uri = self.parseFormValue(body, "redirect_uri") orelse {
+                try self.sendOAuthError(writer, "invalid_request", "Missing redirect_uri parameter");
+                return;
+            };
+            defer self.allocator.free(redirect_uri);
+            
+            // Create token request
+            var token_request = oauth.TokenRequest{
+                .grant_type = grant_type,
+                .client_id = try self.allocator.dupe(u8, client_id),
+                .client_secret = try self.allocator.dupe(u8, client_secret),
+                .code = try self.allocator.dupe(u8, code),
+                .redirect_uri = try self.allocator.dupe(u8, redirect_uri),
+                .refresh_token = null,
+            };
+            defer token_request.deinit(self.allocator);
+            
+            // Exchange code for token
+            var access_token = self.oauth_server.exchangeCodeForToken(token_request) catch |err| {
+                switch (err) {
+                    oauth.OAuthError.InvalidClient => {
+                        try self.sendOAuthError(writer, "invalid_client", "Invalid client credentials");
+                        return;
+                    },
+                    oauth.OAuthError.InvalidGrant => {
+                        try self.sendOAuthError(writer, "invalid_grant", "Invalid or expired authorization code");
+                        return;
+                    },
+                    oauth.OAuthError.UnsupportedGrantType => {
+                        try self.sendOAuthError(writer, "unsupported_grant_type", "Unsupported grant type");
+                        return;
+                    },
+                    else => {
+                        std.debug.print("OAuth token exchange error: {}\n", .{err});
+                        try self.sendInternalError(writer);
+                        return;
+                    }
+                }
+            };
+            defer access_token.deinit(self.allocator);
+            
+            const expires_in = access_token.expires_at - std.time.timestamp();
+            
+            const json_response = if (access_token.refresh_token) |refresh_token|
+                try std.fmt.allocPrint(self.allocator, 
+                    "{{\"access_token\":\"{s}\",\"token_type\":\"Bearer\",\"expires_in\":{d},\"refresh_token\":\"{s}\",\"scope\":\"{s}\"}}", 
+                    .{ access_token.token, expires_in, refresh_token, access_token.scope }
+                )
+            else
+                try std.fmt.allocPrint(self.allocator, 
+                    "{{\"access_token\":\"{s}\",\"token_type\":\"Bearer\",\"expires_in\":{d},\"scope\":\"{s}\"}}", 
+                    .{ access_token.token, expires_in, access_token.scope }
+                );
+            defer self.allocator.free(json_response);
+
+            const response = try std.fmt.allocPrint(self.allocator,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+                .{ json_response.len, json_response }
+            );
+            defer self.allocator.free(response);
+            
+            try writer.writeAll(response);
+        } else {
+            try self.sendOAuthError(writer, "unsupported_grant_type", "Unsupported grant type");
+        }
+    }
+    
+    fn parseFormValue(self: *RouteHandler, body: []const u8, key: []const u8) ?[]u8 {
+        const key_prefix = std.fmt.allocPrint(self.allocator, "{s}=", .{key}) catch return null;
+        defer self.allocator.free(key_prefix);
+        
+        const key_start = std.mem.indexOf(u8, body, key_prefix) orelse return null;
+        const value_start = key_start + key_prefix.len;
+        
+        const value_end = std.mem.indexOfPos(u8, body, value_start, "&") orelse body.len;
+        const value = body[value_start..value_end];
+        
+        return self.allocator.dupe(u8, value) catch null;
+    }
+    
+    fn parseQueryValue(self: *RouteHandler, query: []const u8, key: []const u8) ?[]u8 {
+        const key_prefix = std.fmt.allocPrint(self.allocator, "{s}=", .{key}) catch return null;
+        defer self.allocator.free(key_prefix);
+        
+        const key_start = std.mem.indexOf(u8, query, key_prefix) orelse return null;
+        const value_start = key_start + key_prefix.len;
+        
+        const value_end = std.mem.indexOfPos(u8, query, value_start, "&") orelse query.len;
+        const value = query[value_start..value_end];
+        
+        return self.allocator.dupe(u8, value) catch null;
+    }
+    
+    fn sendOAuthError(self: *RouteHandler, writer: anytype, error_code: []const u8, description: []const u8) !void {
+        const json_response = try std.fmt.allocPrint(self.allocator, 
+            "{{\"error\":\"{s}\",\"error_description\":\"{s}\"}}", 
+            .{ error_code, description }
+        );
+        defer self.allocator.free(json_response);
+
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ json_response.len, json_response }
         );
         defer self.allocator.free(response);
         
