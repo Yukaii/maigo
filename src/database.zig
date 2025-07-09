@@ -42,7 +42,7 @@ pub const Url = struct {
     created_at: i64,
     hits: u64,
     user_id: ?u64,
-    
+
     pub fn deinit(self: *Url, allocator: std.mem.Allocator) void {
         allocator.free(self.short_code);
         allocator.free(self.target_url);
@@ -55,7 +55,7 @@ pub const User = struct {
     email: []const u8,
     password_hash: []const u8,
     created_at: i64,
-    
+
     pub fn deinit(self: *User, allocator: std.mem.Allocator) void {
         allocator.free(self.username);
         allocator.free(self.email);
@@ -66,13 +66,13 @@ pub const User = struct {
 pub const Database = struct {
     db: ?*c.sqlite3,
     allocator: std.mem.Allocator,
-    
+
     pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !Database {
         var db: ?*c.sqlite3 = null;
-        
+
         const db_path_cstr = try allocator.dupeZ(u8, db_path);
         defer allocator.free(db_path_cstr);
-        
+
         const result = c.sqlite3_open(db_path_cstr, &db);
         if (result != c.SQLITE_OK) {
             std.debug.print("Failed to open database: {s}\n", .{c.sqlite3_errmsg(db)});
@@ -81,25 +81,25 @@ pub const Database = struct {
             }
             return DatabaseError.OpenFailed;
         }
-        
+
         var database = Database{
             .db = db,
             .allocator = allocator,
         };
-        
+
         try database.createTables();
-        
+
         return database;
     }
-    
+
     pub fn deinit(self: *Database) void {
         if (self.db) |db| {
             _ = c.sqlite3_close(db);
         }
     }
-    
+
     fn createTables(self: *Database) !void {
-        const create_urls_table = 
+        const create_urls_table =
             \\CREATE TABLE IF NOT EXISTS urls (
             \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
             \\    short_code TEXT UNIQUE NOT NULL,
@@ -110,8 +110,8 @@ pub const Database = struct {
             \\    FOREIGN KEY (user_id) REFERENCES users (id)
             \\);
         ;
-        
-        const create_users_table = 
+
+        const create_users_table =
             \\CREATE TABLE IF NOT EXISTS users (
             \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
             \\    username TEXT UNIQUE NOT NULL,
@@ -120,8 +120,8 @@ pub const Database = struct {
             \\    created_at INTEGER NOT NULL
             \\);
         ;
-        
-        const create_domains_table = 
+
+        const create_domains_table =
             \\CREATE TABLE IF NOT EXISTS domains (
             \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
             \\    domain TEXT UNIQUE NOT NULL,
@@ -133,8 +133,8 @@ pub const Database = struct {
             \\    FOREIGN KEY (user_id) REFERENCES users (id)
             \\);
         ;
-        
-        const create_oauth_clients_table = 
+
+        const create_oauth_clients_table =
             \\CREATE TABLE IF NOT EXISTS oauth_clients (
             \\    id TEXT PRIMARY KEY,
             \\    secret TEXT NOT NULL,
@@ -143,8 +143,8 @@ pub const Database = struct {
             \\    created_at INTEGER NOT NULL
             \\);
         ;
-        
-        const create_authorization_codes_table = 
+
+        const create_authorization_codes_table =
             \\CREATE TABLE IF NOT EXISTS authorization_codes (
             \\    code TEXT PRIMARY KEY,
             \\    client_id TEXT NOT NULL,
@@ -157,8 +157,8 @@ pub const Database = struct {
             \\    FOREIGN KEY (user_id) REFERENCES users (id)
             \\);
         ;
-        
-        const create_access_tokens_table = 
+
+        const create_access_tokens_table =
             \\CREATE TABLE IF NOT EXISTS access_tokens (
             \\    token TEXT PRIMARY KEY,
             \\    client_id TEXT NOT NULL,
@@ -171,14 +171,14 @@ pub const Database = struct {
             \\    FOREIGN KEY (user_id) REFERENCES users (id)
             \\);
         ;
-        
+
         try self.exec(create_urls_table);
         try self.exec(create_users_table);
         try self.exec(create_domains_table);
         try self.exec(create_oauth_clients_table);
         try self.exec(create_authorization_codes_table);
         try self.exec(create_access_tokens_table);
-        
+
         // Create indices for better performance
         try self.exec("CREATE INDEX IF NOT EXISTS idx_urls_short_code ON urls(short_code);");
         try self.exec("CREATE INDEX IF NOT EXISTS idx_urls_user_id ON urls(user_id);");
@@ -187,22 +187,22 @@ pub const Database = struct {
         try self.exec("CREATE INDEX IF NOT EXISTS idx_authorization_codes_user_id ON authorization_codes(user_id);");
         try self.exec("CREATE INDEX IF NOT EXISTS idx_access_tokens_client_id ON access_tokens(client_id);");
         try self.exec("CREATE INDEX IF NOT EXISTS idx_access_tokens_user_id ON access_tokens(user_id);");
-        
+
         // Insert CLI client fixture
         try self.insertCliClientFixture();
     }
-    
+
     fn exec(self: *Database, sql: []const u8) !void {
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         const result = c.sqlite3_exec(self.db, sql_cstr, null, null, null);
         if (result != c.SQLITE_OK) {
             std.debug.print("SQL execution failed: {s}\n", .{c.sqlite3_errmsg(self.db)});
             return DatabaseError.ExecFailed;
         }
     }
-    
+
     fn insertCliClientFixture(self: *Database) !void {
         // Check if CLI client already exists
         const existing_client = try self.getOAuthClient(CLI_CLIENT_ID);
@@ -214,102 +214,102 @@ pub const Database = struct {
             self.allocator.free(client_data.redirect_uri);
             return;
         }
-        
+
         // Insert CLI client fixture
         const sql = "INSERT OR IGNORE INTO oauth_clients (id, secret, name, redirect_uri, created_at) VALUES (?, ?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const client_id_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_ID);
         defer self.allocator.free(client_id_cstr);
-        
+
         const client_secret_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_SECRET);
         defer self.allocator.free(client_secret_cstr);
-        
+
         const client_name_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_NAME);
         defer self.allocator.free(client_name_cstr);
-        
+
         const redirect_uri_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_REDIRECT_URI);
         defer self.allocator.free(redirect_uri_cstr);
-        
+
         const now = std.time.timestamp();
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, client_id_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, client_secret_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 3, client_name_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 4, redirect_uri_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 5, now);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
-        
+
         std.debug.print("CLI OAuth client fixture inserted: {s}\n", .{CLI_CLIENT_ID});
     }
-    
+
     pub fn insertUrl(self: *Database, short_code: []const u8, target_url: []const u8, user_id: ?u64) !u64 {
         const sql = "INSERT INTO urls (short_code, target_url, created_at, user_id) VALUES (?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const short_code_cstr = try self.allocator.dupeZ(u8, short_code);
         defer self.allocator.free(short_code_cstr);
-        
+
         const target_url_cstr = try self.allocator.dupeZ(u8, target_url);
         defer self.allocator.free(target_url_cstr);
-        
+
         const now = std.time.timestamp();
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, short_code_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, target_url_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 3, now);
-        
+
         if (user_id) |uid| {
             _ = c.sqlite3_bind_int64(stmt, 4, @intCast(uid));
         } else {
             _ = c.sqlite3_bind_null(stmt, 4);
         }
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
-        
+
         return @intCast(c.sqlite3_last_insert_rowid(self.db));
     }
-    
+
     pub fn getUrlByShortCode(self: *Database, short_code: []const u8) !?Url {
         const sql = "SELECT id, short_code, target_url, created_at, hits, user_id FROM urls WHERE short_code = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const short_code_cstr = try self.allocator.dupeZ(u8, short_code);
         defer self.allocator.free(short_code_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, short_code_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
             const id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 0)));
@@ -317,12 +317,12 @@ pub const Database = struct {
             const target = std.mem.span(c.sqlite3_column_text(stmt, 2));
             const created_at = c.sqlite3_column_int64(stmt, 3);
             const hits = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 4)));
-            
-            const user_id: ?u64 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL) 
-                null 
-            else 
+
+            const user_id: ?u64 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL)
+                null
+            else
                 @as(u64, @intCast(c.sqlite3_column_int64(stmt, 5)));
-            
+
             return Url{
                 .id = id,
                 .short_code = try self.allocator.dupe(u8, code),
@@ -337,114 +337,114 @@ pub const Database = struct {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn incrementHits(self: *Database, short_code: []const u8) !void {
         const sql = "UPDATE urls SET hits = hits + 1 WHERE short_code = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const short_code_cstr = try self.allocator.dupeZ(u8, short_code);
         defer self.allocator.free(short_code_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, short_code_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn shortCodeExists(self: *Database, short_code: []const u8) !bool {
         const sql = "SELECT 1 FROM urls WHERE short_code = ? LIMIT 1";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const short_code_cstr = try self.allocator.dupeZ(u8, short_code);
         defer self.allocator.free(short_code_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, short_code_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         return result == c.SQLITE_ROW;
     }
-    
+
     // OAuth Client operations
     pub fn insertOAuthClient(self: *Database, client_id: []const u8, secret: []const u8, name: []const u8, redirect_uri: []const u8) !void {
         const sql = "INSERT INTO oauth_clients (id, secret, name, redirect_uri, created_at) VALUES (?, ?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const client_id_cstr = try self.allocator.dupeZ(u8, client_id);
         defer self.allocator.free(client_id_cstr);
-        
+
         const secret_cstr = try self.allocator.dupeZ(u8, secret);
         defer self.allocator.free(secret_cstr);
-        
+
         const name_cstr = try self.allocator.dupeZ(u8, name);
         defer self.allocator.free(name_cstr);
-        
+
         const redirect_uri_cstr = try self.allocator.dupeZ(u8, redirect_uri);
         defer self.allocator.free(redirect_uri_cstr);
-        
+
         const now = std.time.timestamp();
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, client_id_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, secret_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 3, name_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 4, redirect_uri_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 5, now);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn getOAuthClient(self: *Database, client_id: []const u8) !?struct { id: []const u8, secret: []const u8, name: []const u8, redirect_uri: []const u8 } {
         const sql = "SELECT id, secret, name, redirect_uri FROM oauth_clients WHERE id = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const client_id_cstr = try self.allocator.dupeZ(u8, client_id);
         defer self.allocator.free(client_id_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, client_id_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
             const id = std.mem.span(c.sqlite3_column_text(stmt, 0));
             const secret = std.mem.span(c.sqlite3_column_text(stmt, 1));
             const name = std.mem.span(c.sqlite3_column_text(stmt, 2));
             const redirect_uri = std.mem.span(c.sqlite3_column_text(stmt, 3));
-            
+
             return .{
                 .id = try self.allocator.dupe(u8, id),
                 .secret = try self.allocator.dupe(u8, secret),
@@ -457,61 +457,61 @@ pub const Database = struct {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     // Authorization Code operations
     pub fn insertAuthorizationCode(self: *Database, code: []const u8, client_id: []const u8, user_id: u64, redirect_uri: []const u8, expires_at: i64) !void {
         const sql = "INSERT INTO authorization_codes (code, client_id, user_id, redirect_uri, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const code_cstr = try self.allocator.dupeZ(u8, code);
         defer self.allocator.free(code_cstr);
-        
+
         const client_id_cstr = try self.allocator.dupeZ(u8, client_id);
         defer self.allocator.free(client_id_cstr);
-        
+
         const redirect_uri_cstr = try self.allocator.dupeZ(u8, redirect_uri);
         defer self.allocator.free(redirect_uri_cstr);
-        
+
         const now = std.time.timestamp();
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, code_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, client_id_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 3, @intCast(user_id));
         _ = c.sqlite3_bind_text(stmt, 4, redirect_uri_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 5, expires_at);
         _ = c.sqlite3_bind_int64(stmt, 6, now);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn getAuthorizationCode(self: *Database, code: []const u8) !?struct { code: []const u8, client_id: []const u8, user_id: u64, redirect_uri: []const u8, expires_at: i64, used: bool } {
         const sql = "SELECT code, client_id, user_id, redirect_uri, expires_at, used FROM authorization_codes WHERE code = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const code_cstr = try self.allocator.dupeZ(u8, code);
         defer self.allocator.free(code_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, code_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
             const auth_code = std.mem.span(c.sqlite3_column_text(stmt, 0));
@@ -520,7 +520,7 @@ pub const Database = struct {
             const redirect_uri = std.mem.span(c.sqlite3_column_text(stmt, 3));
             const expires_at = c.sqlite3_column_int64(stmt, 4);
             const used = c.sqlite3_column_int(stmt, 5) != 0;
-            
+
             return .{
                 .code = try self.allocator.dupe(u8, auth_code),
                 .client_id = try self.allocator.dupe(u8, client_id),
@@ -535,60 +535,60 @@ pub const Database = struct {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn markAuthorizationCodeUsed(self: *Database, code: []const u8) !void {
         const sql = "UPDATE authorization_codes SET used = 1 WHERE code = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const code_cstr = try self.allocator.dupeZ(u8, code);
         defer self.allocator.free(code_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, code_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     // Access Token operations
     pub fn insertAccessToken(self: *Database, token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8) !void {
         const sql = "INSERT INTO access_tokens (token, client_id, user_id, scope, expires_at, refresh_token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const token_cstr = try self.allocator.dupeZ(u8, token);
         defer self.allocator.free(token_cstr);
-        
+
         const client_id_cstr = try self.allocator.dupeZ(u8, client_id);
         defer self.allocator.free(client_id_cstr);
-        
+
         const scope_cstr = try self.allocator.dupeZ(u8, scope);
         defer self.allocator.free(scope_cstr);
-        
+
         const now = std.time.timestamp();
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, token_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, client_id_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 3, @intCast(user_id));
         _ = c.sqlite3_bind_text(stmt, 4, scope_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 5, expires_at);
-        
+
         if (refresh_token) |rt| {
             const refresh_token_cstr = try self.allocator.dupeZ(u8, rt);
             defer self.allocator.free(refresh_token_cstr);
@@ -596,32 +596,32 @@ pub const Database = struct {
         } else {
             _ = c.sqlite3_bind_null(stmt, 6);
         }
-        
+
         _ = c.sqlite3_bind_int64(stmt, 7, now);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn getAccessToken(self: *Database, token: []const u8) !?struct { token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8 } {
         const sql = "SELECT token, client_id, user_id, scope, expires_at, refresh_token FROM access_tokens WHERE token = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const token_cstr = try self.allocator.dupeZ(u8, token);
         defer self.allocator.free(token_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, token_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
             const access_token = std.mem.span(c.sqlite3_column_text(stmt, 0));
@@ -629,12 +629,12 @@ pub const Database = struct {
             const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 2)));
             const scope = std.mem.span(c.sqlite3_column_text(stmt, 3));
             const expires_at = c.sqlite3_column_int64(stmt, 4);
-            
-            const refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL) 
-                null 
-            else 
+
+            const refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL)
+                null
+            else
                 try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 5)));
-            
+
             return .{
                 .token = try self.allocator.dupe(u8, access_token),
                 .client_id = try self.allocator.dupe(u8, client_id),
@@ -649,24 +649,24 @@ pub const Database = struct {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn getAccessTokenByRefresh(self: *Database, refresh_token: []const u8) !?struct { token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8 } {
         const sql = "SELECT token, client_id, user_id, scope, expires_at, refresh_token FROM access_tokens WHERE refresh_token = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const refresh_token_cstr = try self.allocator.dupeZ(u8, refresh_token);
         defer self.allocator.free(refresh_token_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, refresh_token_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
             const access_token = std.mem.span(c.sqlite3_column_text(stmt, 0));
@@ -674,12 +674,12 @@ pub const Database = struct {
             const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 2)));
             const scope = std.mem.span(c.sqlite3_column_text(stmt, 3));
             const expires_at = c.sqlite3_column_int64(stmt, 4);
-            
-            const stored_refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL) 
-                null 
-            else 
+
+            const stored_refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL)
+                null
+            else
                 try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 5)));
-            
+
             return .{
                 .token = try self.allocator.dupe(u8, access_token),
                 .client_id = try self.allocator.dupe(u8, client_id),
@@ -694,83 +694,83 @@ pub const Database = struct {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn revokeAccessToken(self: *Database, token: []const u8) !void {
         const sql = "DELETE FROM access_tokens WHERE token = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const token_cstr = try self.allocator.dupeZ(u8, token);
         defer self.allocator.free(token_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, token_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
     }
-    
+
     pub fn insertUser(self: *Database, username: []const u8, email: []const u8, password_hash: []const u8) !u64 {
         const sql = "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const username_cstr = try self.allocator.dupeZ(u8, username);
         defer self.allocator.free(username_cstr);
-        
+
         const email_cstr = try self.allocator.dupeZ(u8, email);
         defer self.allocator.free(email_cstr);
-        
+
         const password_hash_cstr = try self.allocator.dupeZ(u8, password_hash);
         defer self.allocator.free(password_hash_cstr);
-        
+
         const now = std.time.timestamp();
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, username_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, email_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 3, password_hash_cstr, -1, null);
         _ = c.sqlite3_bind_int64(stmt, 4, now);
-        
+
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
             return DatabaseError.StepFailed;
         }
-        
+
         return @intCast(c.sqlite3_last_insert_rowid(self.db));
     }
-    
+
     pub fn getUserByUsername(self: *Database, username: []const u8) !?User {
         const sql = "SELECT id, username, email, password_hash, created_at FROM users WHERE username = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
-        
+
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
-        
+
         const username_cstr = try self.allocator.dupeZ(u8, username);
         defer self.allocator.free(username_cstr);
-        
+
         _ = c.sqlite3_bind_text(stmt, 1, username_cstr, -1, null);
-        
+
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
             const id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 0)));
@@ -778,7 +778,7 @@ pub const Database = struct {
             const email = std.mem.span(c.sqlite3_column_text(stmt, 2));
             const password_hash = std.mem.span(c.sqlite3_column_text(stmt, 3));
             const created_at = c.sqlite3_column_int64(stmt, 4);
-            
+
             return User{
                 .id = id,
                 .username = try self.allocator.dupe(u8, user_username),
@@ -796,19 +796,19 @@ pub const Database = struct {
 
 test "database basic operations" {
     const allocator = testing.allocator;
-    
+
     // Use in-memory database for testing
     var db = try Database.init(allocator, ":memory:");
     defer db.deinit();
-    
+
     // Test inserting a URL
     const url_id = try db.insertUrl("test123", "https://example.com", null);
     try testing.expect(url_id > 0);
-    
+
     // Test retrieving the URL
     var url = try db.getUrlByShortCode("test123");
     try testing.expect(url != null);
-    
+
     if (url) |*u| {
         defer u.deinit(allocator);
         try testing.expectEqualStrings("test123", u.short_code);
@@ -816,18 +816,18 @@ test "database basic operations" {
         try testing.expect(u.hits == 0);
         try testing.expect(u.user_id == null);
     }
-    
+
     // Test incrementing hits
     try db.incrementHits("test123");
-    
+
     var updated_url = try db.getUrlByShortCode("test123");
     try testing.expect(updated_url != null);
-    
+
     if (updated_url) |*u| {
         defer u.deinit(allocator);
         try testing.expect(u.hits == 1);
     }
-    
+
     // Test short code existence check
     try testing.expect(try db.shortCodeExists("test123"));
     try testing.expect(!try db.shortCodeExists("nonexistent"));

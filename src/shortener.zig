@@ -65,7 +65,7 @@ pub const Shortener = struct {
         while (i > 0) {
             i -= 1;
             const char = code[i];
-            
+
             const digit = for (BASE62_CHARS, 0..) |c, idx| {
                 if (c == char) break idx;
             } else return error.InvalidCharacter;
@@ -79,7 +79,7 @@ pub const Shortener = struct {
 
     pub fn generateRandom(self: *Shortener, length: usize) !ShortCode {
         const code = try self.allocator.alloc(u8, length);
-        
+
         for (code) |*c| {
             const idx = self.rng.random().uintLessThan(usize, BASE62_LEN);
             c.* = BASE62_CHARS[idx];
@@ -93,28 +93,28 @@ pub const Shortener = struct {
 
     pub fn isValidCode(code: []const u8) bool {
         if (code.len == 0) return false;
-        
+
         for (code) |c| {
             const valid = for (BASE62_CHARS) |valid_char| {
                 if (c == valid_char) break true;
             } else false;
-            
+
             if (!valid) return false;
         }
-        
+
         return true;
     }
 };
 
 test "encode and decode id" {
     var shortener = Shortener.init(testing.allocator);
-    
+
     const test_cases = [_]u64{ 0, 1, 61, 62, 123, 999999 };
-    
+
     for (test_cases) |id| {
         var short_code = try shortener.encodeId(id);
         defer short_code.deinit();
-        
+
         const decoded = try Shortener.decodeId(short_code.code);
         try testing.expectEqual(id, decoded);
     }
@@ -122,13 +122,13 @@ test "encode and decode id" {
 
 test "generate random code" {
     var shortener = Shortener.init(testing.allocator);
-    
+
     var code1 = try shortener.generateRandom(6);
     defer code1.deinit();
-    
+
     var code2 = try shortener.generateRandom(6);
     defer code2.deinit();
-    
+
     try testing.expect(code1.code.len == 6);
     try testing.expect(code2.code.len == 6);
     try testing.expect(!std.mem.eql(u8, code1.code, code2.code));
@@ -145,15 +145,15 @@ test "validate code" {
 
 test "base62 encoding properties" {
     var shortener = Shortener.init(testing.allocator);
-    
+
     var code1 = try shortener.encodeId(1);
     defer code1.deinit();
     try testing.expectEqualStrings("1", code1.code);
-    
+
     var code61 = try shortener.encodeId(61);
     defer code61.deinit();
     try testing.expectEqualStrings("z", code61.code);
-    
+
     var code62 = try shortener.encodeId(62);
     defer code62.deinit();
     try testing.expectEqualStrings("10", code62.code);
