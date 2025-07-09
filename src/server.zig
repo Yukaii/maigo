@@ -509,6 +509,69 @@ pub const RouteHandler = struct {
             defer self.allocator.free(response);
             
             try writer.writeAll(response);
+        } else if (grant_type == .refresh_token) {
+            const refresh_token = self.parseFormValue(body, "refresh_token") orelse {
+                try self.sendOAuthError(writer, "invalid_request", "Missing refresh_token parameter");
+                return;
+            };
+            defer self.allocator.free(refresh_token);
+            
+            // Create refresh token request
+            var token_request = oauth.TokenRequest{
+                .grant_type = grant_type,
+                .client_id = try self.allocator.dupe(u8, client_id),
+                .client_secret = try self.allocator.dupe(u8, client_secret),
+                .code = null,
+                .redirect_uri = null,
+                .refresh_token = try self.allocator.dupe(u8, refresh_token),
+            };
+            defer token_request.deinit(self.allocator);
+            
+            // Exchange refresh token for new access token
+            var access_token = self.oauth_server.exchangeCodeForToken(token_request) catch |err| {
+                switch (err) {
+                    oauth.OAuthError.InvalidClient => {
+                        try self.sendOAuthError(writer, "invalid_client", "Invalid client credentials");
+                        return;
+                    },
+                    oauth.OAuthError.InvalidGrant => {
+                        try self.sendOAuthError(writer, "invalid_grant", "Invalid or expired refresh token");
+                        return;
+                    },
+                    oauth.OAuthError.UnsupportedGrantType => {
+                        try self.sendOAuthError(writer, "unsupported_grant_type", "Unsupported grant type");
+                        return;
+                    },
+                    else => {
+                        std.debug.print("OAuth refresh token error: {}\n", .{err});
+                        try self.sendInternalError(writer);
+                        return;
+                    }
+                }
+            };
+            defer access_token.deinit(self.allocator);
+            
+            const expires_in = access_token.expires_at - std.time.timestamp();
+            
+            const json_response = if (access_token.refresh_token) |new_refresh_token|
+                try std.fmt.allocPrint(self.allocator, 
+                    "{{\"access_token\":\"{s}\",\"token_type\":\"Bearer\",\"expires_in\":{d},\"refresh_token\":\"{s}\",\"scope\":\"{s}\"}}", 
+                    .{ access_token.token, expires_in, new_refresh_token, access_token.scope }
+                )
+            else
+                try std.fmt.allocPrint(self.allocator, 
+                    "{{\"access_token\":\"{s}\",\"token_type\":\"Bearer\",\"expires_in\":{d},\"scope\":\"{s}\"}}", 
+                    .{ access_token.token, expires_in, access_token.scope }
+                );
+            defer self.allocator.free(json_response);
+
+            const response = try std.fmt.allocPrint(self.allocator,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+                .{ json_response.len, json_response }
+            );
+            defer self.allocator.free(response);
+            
+            try writer.writeAll(response);
         } else {
             try self.sendOAuthError(writer, "unsupported_grant_type", "Unsupported grant type");
         }

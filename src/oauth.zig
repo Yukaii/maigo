@@ -188,9 +188,14 @@ pub const OAuthServer = struct {
     }
     
     pub fn exchangeCodeForToken(self: *OAuthServer, request: TokenRequest) !AccessToken {
-        if (request.grant_type != .authorization_code) {
-            return OAuthError.UnsupportedGrantType;
+        switch (request.grant_type) {
+            .authorization_code => return self.handleAuthorizationCodeGrant(request),
+            .refresh_token => return self.handleRefreshTokenGrant(request),
+            else => return OAuthError.UnsupportedGrantType,
         }
+    }
+    
+    fn handleAuthorizationCodeGrant(self: *OAuthServer, request: TokenRequest) !AccessToken {
         
         const code = request.code orelse return OAuthError.InvalidRequest;
         const redirect_uri = request.redirect_uri orelse return OAuthError.InvalidRequest;
@@ -238,6 +243,56 @@ pub const OAuthServer = struct {
             .scope = try self.allocator.dupe(u8, "url:write url:read"),
             .expires_at = expires_at,
             .refresh_token = refresh_token,
+        };
+        
+        try self.storeAccessToken(token);
+        
+        return token;
+    }
+    
+    fn handleRefreshTokenGrant(self: *OAuthServer, request: TokenRequest) !AccessToken {
+        const refresh_token = request.refresh_token orelse return OAuthError.InvalidRequest;
+        
+        // Validate client
+        var client = try self.getClient(request.client_id) orelse return OAuthError.InvalidClient;
+        defer client.deinit(self.allocator);
+        
+        if (!std.mem.eql(u8, client.secret, request.client_secret)) {
+            return OAuthError.InvalidClient;
+        }
+        
+        // Find existing token by refresh token
+        const existing_token = try self.getAccessTokenByRefresh(refresh_token) orelse return OAuthError.InvalidGrant;
+        defer {
+            self.allocator.free(existing_token.token);
+            self.allocator.free(existing_token.client_id);
+            self.allocator.free(existing_token.scope);
+            if (existing_token.refresh_token) |rt| {
+                self.allocator.free(rt);
+            }
+        }
+        
+        // Validate token hasn't expired (refresh tokens have longer expiration)
+        if (std.time.timestamp() > existing_token.expires_at + 7 * 24 * 3600) { // 7 days
+            return OAuthError.InvalidGrant;
+        }
+        
+        // Generate new access token
+        const new_access_token = try self.generateRandomString(64);
+        const new_refresh_token = try self.generateRandomString(64);
+        const expires_at = std.time.timestamp() + 3600; // 1 hour
+        
+        // Revoke old token
+        try self.revokeAccessToken(existing_token.token);
+        
+        // Create new token
+        const token = AccessToken{
+            .token = new_access_token,
+            .client_id = try self.allocator.dupe(u8, request.client_id),
+            .user_id = existing_token.user_id,
+            .scope = try self.allocator.dupe(u8, existing_token.scope),
+            .expires_at = expires_at,
+            .refresh_token = new_refresh_token,
         };
         
         try self.storeAccessToken(token);
@@ -336,6 +391,23 @@ pub const OAuthServer = struct {
             .expires_at = token_data.expires_at,
             .refresh_token = token_data.refresh_token,
         };
+    }
+    
+    fn getAccessTokenByRefresh(self: *OAuthServer, refresh_token: []const u8) !?AccessToken {
+        const token_data = try self.db.getAccessTokenByRefresh(refresh_token) orelse return null;
+        
+        return AccessToken{
+            .token = token_data.token,
+            .client_id = token_data.client_id,
+            .user_id = token_data.user_id,
+            .scope = token_data.scope,
+            .expires_at = token_data.expires_at,
+            .refresh_token = token_data.refresh_token,
+        };
+    }
+    
+    fn revokeAccessToken(self: *OAuthServer, token: []const u8) !void {
+        try self.db.revokeAccessToken(token);
     }
 };
 
@@ -484,4 +556,84 @@ test "response type parsing" {
     try testing.expect(ResponseType.fromString("code") == .code);
     try testing.expect(ResponseType.fromString("token") == .token);
     try testing.expect(ResponseType.fromString("invalid") == null);
+}
+
+test "oauth refresh token flow" {
+    const allocator = testing.allocator;
+    
+    var db = try database.Database.init(allocator, ":memory:");
+    defer db.deinit();
+    
+    var oauth_server = OAuthServer.init(allocator, &db);
+    
+    // Create a test client
+    var client = try oauth_server.createClient("Test App", "http://localhost:3000/callback");
+    defer client.deinit(allocator);
+    
+    try db.insertOAuthClient(client.id, client.secret, client.name, client.redirect_uri);
+    
+    // Create a test user
+    const user_id = try db.insertUser("testuser", "test@example.com");
+    
+    // Create authorization request
+    var auth_request = AuthorizeRequest{
+        .response_type = .code,
+        .client_id = try allocator.dupe(u8, client.id),
+        .redirect_uri = try allocator.dupe(u8, client.redirect_uri),
+        .scope = try allocator.dupe(u8, "url:read url:write"),
+        .state = null,
+    };
+    defer auth_request.deinit(allocator);
+    
+    // Get authorization code
+    const auth_code = try oauth_server.authorize(auth_request, user_id);
+    defer allocator.free(auth_code);
+    
+    // Exchange code for initial token
+    var initial_token_request = TokenRequest{
+        .grant_type = .authorization_code,
+        .client_id = try allocator.dupe(u8, client.id),
+        .client_secret = try allocator.dupe(u8, client.secret),
+        .code = try allocator.dupe(u8, auth_code),
+        .redirect_uri = try allocator.dupe(u8, client.redirect_uri),
+        .refresh_token = null,
+    };
+    defer initial_token_request.deinit(allocator);
+    
+    var initial_token = try oauth_server.exchangeCodeForToken(initial_token_request);
+    defer initial_token.deinit(allocator);
+    
+    try testing.expect(initial_token.refresh_token != null);
+    const refresh_token_value = initial_token.refresh_token.?;
+    
+    // Use refresh token to get new access token
+    var refresh_token_request = TokenRequest{
+        .grant_type = .refresh_token,
+        .client_id = try allocator.dupe(u8, client.id),
+        .client_secret = try allocator.dupe(u8, client.secret),
+        .code = null,
+        .redirect_uri = null,
+        .refresh_token = try allocator.dupe(u8, refresh_token_value),
+    };
+    defer refresh_token_request.deinit(allocator);
+    
+    var new_token = try oauth_server.exchangeCodeForToken(refresh_token_request);
+    defer new_token.deinit(allocator);
+    
+    // Verify new token is different but has same user_id and scope
+    try testing.expect(!std.mem.eql(u8, initial_token.token, new_token.token));
+    try testing.expect(initial_token.user_id == new_token.user_id);
+    try testing.expectEqualStrings(initial_token.scope, new_token.scope);
+    try testing.expect(new_token.refresh_token != null);
+    try testing.expect(!std.mem.eql(u8, refresh_token_value, new_token.refresh_token.?));
+    
+    // Verify old token is revoked and new token is valid
+    const old_token_validation = try oauth_server.validateToken(initial_token.token);
+    try testing.expect(old_token_validation == null);
+    
+    const new_token_validation = try oauth_server.validateToken(new_token.token);
+    try testing.expect(new_token_validation != null);
+    
+    var validated = new_token_validation.?;
+    defer validated.deinit(allocator);
 }

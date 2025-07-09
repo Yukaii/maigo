@@ -570,6 +570,74 @@ pub const Database = struct {
         }
     }
     
+    pub fn getAccessTokenByRefresh(self: *Database, refresh_token: []const u8) !?struct { token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8 } {
+        const sql = "SELECT token, client_id, user_id, scope, expires_at, refresh_token FROM access_tokens WHERE refresh_token = ?";
+        const sql_cstr = try self.allocator.dupeZ(u8, sql);
+        defer self.allocator.free(sql_cstr);
+        
+        var stmt: ?*c.sqlite3_stmt = null;
+        var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
+        if (result != c.SQLITE_OK) {
+            return DatabaseError.PrepareFailed;
+        }
+        defer _ = c.sqlite3_finalize(stmt);
+        
+        const refresh_token_cstr = try self.allocator.dupeZ(u8, refresh_token);
+        defer self.allocator.free(refresh_token_cstr);
+        
+        _ = c.sqlite3_bind_text(stmt, 1, refresh_token_cstr, -1, null);
+        
+        result = c.sqlite3_step(stmt);
+        if (result == c.SQLITE_ROW) {
+            const access_token = std.mem.span(c.sqlite3_column_text(stmt, 0));
+            const client_id = std.mem.span(c.sqlite3_column_text(stmt, 1));
+            const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 2)));
+            const scope = std.mem.span(c.sqlite3_column_text(stmt, 3));
+            const expires_at = c.sqlite3_column_int64(stmt, 4);
+            
+            const stored_refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL) 
+                null 
+            else 
+                try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 5)));
+            
+            return .{
+                .token = try self.allocator.dupe(u8, access_token),
+                .client_id = try self.allocator.dupe(u8, client_id),
+                .user_id = user_id,
+                .scope = try self.allocator.dupe(u8, scope),
+                .expires_at = expires_at,
+                .refresh_token = stored_refresh_token,
+            };
+        } else if (result == c.SQLITE_DONE) {
+            return null;
+        } else {
+            return DatabaseError.StepFailed;
+        }
+    }
+    
+    pub fn revokeAccessToken(self: *Database, token: []const u8) !void {
+        const sql = "DELETE FROM access_tokens WHERE token = ?";
+        const sql_cstr = try self.allocator.dupeZ(u8, sql);
+        defer self.allocator.free(sql_cstr);
+        
+        var stmt: ?*c.sqlite3_stmt = null;
+        var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
+        if (result != c.SQLITE_OK) {
+            return DatabaseError.PrepareFailed;
+        }
+        defer _ = c.sqlite3_finalize(stmt);
+        
+        const token_cstr = try self.allocator.dupeZ(u8, token);
+        defer self.allocator.free(token_cstr);
+        
+        _ = c.sqlite3_bind_text(stmt, 1, token_cstr, -1, null);
+        
+        result = c.sqlite3_step(stmt);
+        if (result != c.SQLITE_DONE) {
+            return DatabaseError.StepFailed;
+        }
+    }
+    
     pub fn insertUser(self: *Database, username: []const u8, email: []const u8) !u64 {
         const sql = "INSERT INTO users (username, email, created_at) VALUES (?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
