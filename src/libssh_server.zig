@@ -9,7 +9,7 @@ pub const LibSSHServer = struct {
 
     pub fn init(allocator: std.mem.Allocator, db: *database.Database, host: []const u8, port: u16) !LibSSHServer {
         const ssh_server = try libssh.SSHServer.init(allocator, host, port);
-        
+
         return LibSSHServer{
             .allocator = allocator,
             .db = db,
@@ -31,7 +31,7 @@ pub const LibSSHServer = struct {
 
         while (true) {
             std.debug.print("Waiting for SSH connections...\n", .{});
-            
+
             var connection = self.ssh_server.accept() catch |err| {
                 std.debug.print("Failed to accept SSH connection: {}\n", .{err});
                 continue;
@@ -74,7 +74,7 @@ pub const LibSSHServer = struct {
         // Process SSH messages manually
         var authenticated = false;
         var channel: ?*libssh.SSHChannel = null;
-        
+
         // Authentication loop
         while (!authenticated) {
             const msg = libssh.ssh_message_get(connection.session) orelse {
@@ -82,24 +82,28 @@ pub const LibSSHServer = struct {
                 break;
             };
             defer libssh.ssh_message_free(msg);
-            
+
             const msg_type = libssh.ssh_message_type(msg);
             std.debug.print("Received message type: {}\n", .{msg_type});
-            
+
             if (msg_type == libssh.SSH_REQUEST_AUTH) {
                 const msg_subtype = libssh.ssh_message_subtype(msg);
                 std.debug.print("Auth method: {}\n", .{msg_subtype});
-                
+
                 if (msg_subtype == libssh.SSH_AUTH_METHOD_NONE) {
-                    // Client is asking what auth methods are available
-                    std.debug.print("Client requesting available auth methods\n", .{});
-                    _ = libssh.ssh_message_auth_reply_default(msg);
+                    // Client is asking what auth methods are available - accept immediately
+                    std.debug.print("Client requesting available auth methods - accepting none auth\n", .{});
+                    if (libssh.ssh_message_auth_reply_success(msg, 0) == libssh.SSH_OK) {
+                        std.debug.print("Authentication successful with none method\n", .{});
+                        authenticated = true;
+                        continue;
+                    }
                 } else if (msg_subtype == libssh.SSH_AUTH_METHOD_PASSWORD) {
                     const user = libssh.ssh_message_auth_user(msg);
                     const password = libssh.ssh_message_auth_password(msg);
-                    
-                    std.debug.print("Authentication attempt: user={s}, password={s}\n", .{user, password});
-                    
+
+                    std.debug.print("Authentication attempt: user={s}, password={s}\n", .{ user, password });
+
                     // For demo purposes, accept any user/password
                     if (libssh.ssh_message_auth_reply_success(msg, 0) == libssh.SSH_OK) {
                         std.debug.print("Authentication successful\n", .{});
@@ -120,12 +124,12 @@ pub const LibSSHServer = struct {
                 _ = libssh.ssh_message_reply_default(msg);
             }
         }
-        
+
         if (!authenticated) {
             std.debug.print("Authentication failed\n", .{});
             return;
         }
-        
+
         // Channel setup loop
         while (channel == null) {
             const msg = libssh.ssh_message_get(connection.session) orelse {
@@ -133,10 +137,10 @@ pub const LibSSHServer = struct {
                 break;
             };
             defer libssh.ssh_message_free(msg);
-            
+
             const msg_type = libssh.ssh_message_type(msg);
             std.debug.print("Received channel message type: {}\n", .{msg_type});
-            
+
             if (msg_type == libssh.SSH_REQUEST_CHANNEL_OPEN) {
                 const msg_subtype = libssh.ssh_message_subtype(msg);
                 if (msg_subtype == libssh.SSH_CHANNEL_SESSION) {
@@ -148,33 +152,40 @@ pub const LibSSHServer = struct {
                 }
             }
         }
-        
+
         if (channel) |ch| {
             // Handle channel requests (pty, shell, etc.)
             var pty_allocated = false;
             var shell_requested = false;
-            
+
             while (!shell_requested) {
                 const msg = libssh.ssh_message_get(connection.session) orelse {
                     std.debug.print("No shell message received\n", .{});
                     break;
                 };
                 defer libssh.ssh_message_free(msg);
-                
+
                 const msg_type = libssh.ssh_message_type(msg);
                 if (msg_type == libssh.SSH_REQUEST_CHANNEL) {
                     const msg_subtype = libssh.ssh_message_subtype(msg);
-                    
+
                     if (msg_subtype == libssh.SSH_CHANNEL_REQUEST_PTY) {
                         std.debug.print("PTY request received\n", .{});
-                        
+
+                        // Get terminal size from PTY request
+                        const term_type = libssh.ssh_message_channel_request_pty_term(msg);
+                        const cols = libssh.ssh_message_channel_request_pty_width(msg);
+                        const rows = libssh.ssh_message_channel_request_pty_height(msg);
+
+                        std.debug.print("PTY details - term: {s}, cols: {d}, rows: {d}\n", .{ term_type, cols, rows });
+
                         if (libssh.ssh_message_channel_request_reply_success(msg) == libssh.SSH_OK) {
                             std.debug.print("PTY request accepted\n", .{});
                             pty_allocated = true;
                         }
                     } else if (msg_subtype == libssh.SSH_CHANNEL_REQUEST_SHELL) {
                         std.debug.print("Shell request received\n", .{});
-                        
+
                         if (libssh.ssh_message_channel_request_reply_success(msg) == libssh.SSH_OK) {
                             std.debug.print("Shell request accepted\n", .{});
                             shell_requested = true;
@@ -185,7 +196,7 @@ pub const LibSSHServer = struct {
                     }
                 }
             }
-            
+
             if (shell_requested) {
                 // Start TUI session
                 try startTuiSession(&handler, ch);
@@ -213,7 +224,7 @@ fn connectionMessageHandler(msg: *libssh.SSHMessage) void {
 
 fn processMessage(handler: *ConnectionHandler, msg: *libssh.SSHMessage) void {
     const msg_type = libssh.ssh_message_type(msg);
-    
+
     if (msg_type == libssh.SSH_REQUEST_AUTH) {
         handleAuthenticationMessage(handler, msg);
     } else if (msg_type == libssh.SSH_REQUEST_CHANNEL_OPEN) {
@@ -227,13 +238,13 @@ fn processMessage(handler: *ConnectionHandler, msg: *libssh.SSHMessage) void {
 
 fn handleAuthenticationMessage(handler: *ConnectionHandler, msg: *libssh.SSHMessage) void {
     const msg_subtype = libssh.ssh_message_subtype(msg);
-    
+
     if (msg_subtype == libssh.SSH_AUTH_METHOD_PASSWORD) {
         const user = libssh.ssh_message_auth_user(msg);
         const password = libssh.ssh_message_auth_password(msg);
-        
+
         std.debug.print("Authentication attempt: user={s}\n", .{user});
-        
+
         // For demo purposes, authenticate any user with any password
         // In production, implement proper authentication against the database
         if (authenticateUser(handler, user, password)) {
@@ -243,20 +254,20 @@ fn handleAuthenticationMessage(handler: *ConnectionHandler, msg: *libssh.SSHMess
                 return;
             }
         }
-        
+
         std.debug.print("Authentication failed for user: {s}\n", .{user});
     }
-    
+
     // Reject authentication
     _ = libssh.ssh_message_auth_reply_default(msg);
 }
 
 fn handleChannelOpenMessage(handler: *ConnectionHandler, msg: *libssh.SSHMessage) void {
     const msg_subtype = libssh.ssh_message_subtype(msg);
-    
+
     if (msg_subtype == libssh.SSH_CHANNEL_SESSION) {
         std.debug.print("Channel open request received\n", .{});
-        
+
         const channel = libssh.ssh_message_channel_request_open_reply_accept(msg);
         if (channel) |ch| {
             handler.channel = ch;
@@ -269,14 +280,15 @@ fn handleChannelOpenMessage(handler: *ConnectionHandler, msg: *libssh.SSHMessage
 
 fn handleChannelRequestMessage(handler: *ConnectionHandler, msg: *libssh.SSHMessage) void {
     const msg_subtype = libssh.ssh_message_subtype(msg);
-    
-    if (msg_subtype == libssh.SSH_CHANNEL_REQUEST_SHELL or 
-       msg_subtype == libssh.SSH_CHANNEL_REQUEST_PTY) {
+
+    if (msg_subtype == libssh.SSH_CHANNEL_REQUEST_SHELL or
+        msg_subtype == libssh.SSH_CHANNEL_REQUEST_PTY)
+    {
         std.debug.print("Channel request: shell/pty\n", .{});
-        
+
         if (libssh.ssh_message_channel_request_reply_success(msg) == libssh.SSH_OK) {
             std.debug.print("Channel request accepted\n", .{});
-            
+
             // Start the TUI session
             if (handler.channel) |channel| {
                 startTuiSession(handler, channel) catch |err| {
@@ -291,7 +303,7 @@ fn authenticateUser(handler: *ConnectionHandler, user: [*:0]const u8, password: 
     _ = handler;
     _ = user;
     _ = password;
-    
+
     // For demo purposes, accept any authentication
     // In production, verify against the database
     return true;
@@ -299,19 +311,19 @@ fn authenticateUser(handler: *ConnectionHandler, user: [*:0]const u8, password: 
 
 fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
     std.debug.print("Starting TUI session\n", .{});
-    
+
     // Initialize terminal with proper escape sequences
     const terminal_init = "\x1b[2J\x1b[H\x1b[?25h"; // Clear screen, move cursor to home, show cursor
-    
+
     const bytes_written = libssh.ssh_channel_write(channel, terminal_init);
     if (bytes_written < 0) {
         std.debug.print("Failed to write terminal init, bytes: {}\n", .{bytes_written});
         return error.ChannelWriteFailed;
     }
     std.debug.print("Terminal init written, {} bytes\n", .{bytes_written});
-    
+
     // Send welcome message
-    const welcome_msg = 
+    const welcome_msg =
         \\Welcome to Maigo URL Shortener!
         \\================================
         \\
@@ -322,18 +334,18 @@ fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !vo
         \\
         \\
     ;
-    
+
     const welcome_bytes = libssh.ssh_channel_write(channel, welcome_msg);
     if (welcome_bytes < 0) {
         std.debug.print("Failed to write welcome message, bytes: {}\n", .{welcome_bytes});
         return error.ChannelWriteFailed;
     }
     std.debug.print("Welcome message written, {} bytes\n", .{welcome_bytes});
-    
+
     // Main TUI loop
     while (libssh.ssh_channel_is_open(channel) != 0) {
         // Send menu
-        const menu_msg = 
+        const menu_msg =
             \\┌─ Main Menu ─────────────────────────┐
             \\│ 1. Register new account             │
             \\│ 2. Login to existing account        │
@@ -342,18 +354,18 @@ fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !vo
             \\
             \\Enter choice (1-3): 
         ;
-        
+
         const menu_bytes_written = libssh.ssh_channel_write(channel, menu_msg);
         if (menu_bytes_written < 0) {
             std.debug.print("Failed to write menu, bytes: {}\n", .{menu_bytes_written});
             break;
         }
         std.debug.print("Menu written, {} bytes\n", .{menu_bytes_written});
-        
+
         // Read user input
         var buffer: [256]u8 = undefined;
         const bytes_read = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000); // 30 second timeout
-        
+
         if (bytes_read <= 0) {
             if (libssh.ssh_channel_is_eof(channel) != 0) {
                 std.debug.print("Channel EOF reached\n", .{});
@@ -361,16 +373,16 @@ fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !vo
             }
             continue;
         }
-        
+
         const input = std.mem.trim(u8, buffer[0..@intCast(bytes_read)], " \r\n\t");
         std.debug.print("Received input: '{s}'\n", .{input});
-        
+
         if (std.mem.eql(u8, input, "1")) {
             try handleRegistration(handler, channel);
         } else if (std.mem.eql(u8, input, "2")) {
             try handleLogin(handler, channel);
         } else if (std.mem.eql(u8, input, "3")) {
-            const goodbye_msg = 
+            const goodbye_msg =
                 \\
                 \\Thank you for using Maigo!
                 \\Goodbye! 👋
@@ -379,7 +391,7 @@ fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !vo
             _ = libssh.ssh_channel_write(channel, goodbye_msg);
             break;
         } else {
-            const error_msg = 
+            const error_msg =
                 \\
                 \\❌ Invalid choice. Please enter 1, 2, or 3.
                 \\
@@ -388,12 +400,12 @@ fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !vo
             _ = libssh.ssh_channel_write(channel, error_msg);
         }
     }
-    
+
     std.debug.print("TUI session ended\n", .{});
 }
 
 fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
-    const reg_header = 
+    const reg_header =
         \\
         \\┌─ User Registration ─────────────────┐
         \\│ Create a new Maigo account         │
@@ -401,23 +413,23 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         \\
         \\👤 Enter username: 
     ;
-    
+
     if (libssh.ssh_channel_write(channel, reg_header) < 0) {
         return error.ChannelWriteFailed;
     }
-    
+
     // Read username
     var buffer: [256]u8 = undefined;
     const bytes_read = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
-    
+
     if (bytes_read <= 0) {
         return error.ReadTimeout;
     }
-    
+
     const username = std.mem.trim(u8, buffer[0..@intCast(bytes_read)], " \r\n\t");
-    
+
     if (username.len < 3) {
-        const error_msg = 
+        const error_msg =
             \\❌ Username must be at least 3 characters long.
             \\
             \\
@@ -425,12 +437,12 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Check if username exists
     var existing_user = try handler.db.getUserByUsername(username);
     if (existing_user) |*user| {
         user.deinit(handler.allocator);
-        const error_msg = 
+        const error_msg =
             \\❌ Username already exists. Please choose a different one.
             \\
             \\
@@ -438,25 +450,25 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Get email
-    const email_prompt = 
+    const email_prompt =
         \\📧 Enter email: 
     ;
-    
+
     if (libssh.ssh_channel_write(channel, email_prompt) < 0) {
         return error.ChannelWriteFailed;
     }
-    
+
     const email_bytes = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
     if (email_bytes <= 0) {
         return error.ReadTimeout;
     }
-    
+
     const email = std.mem.trim(u8, buffer[0..@intCast(email_bytes)], " \r\n\t");
-    
+
     if (email.len == 0 or std.mem.indexOf(u8, email, "@") == null) {
-        const error_msg = 
+        const error_msg =
             \\❌ Invalid email address.
             \\
             \\
@@ -464,25 +476,25 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Get password
-    const password_prompt = 
+    const password_prompt =
         \\🔒 Enter password (min 6 chars): 
     ;
-    
+
     if (libssh.ssh_channel_write(channel, password_prompt) < 0) {
         return error.ChannelWriteFailed;
     }
-    
+
     const password_bytes = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
     if (password_bytes <= 0) {
         return error.ReadTimeout;
     }
-    
+
     const password = std.mem.trim(u8, buffer[0..@intCast(password_bytes)], " \r\n\t");
-    
+
     if (password.len < 6) {
-        const error_msg = 
+        const error_msg =
             \\❌ Password must be at least 6 characters long.
             \\
             \\
@@ -490,22 +502,22 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Create user
-    const creating_msg = 
+    const creating_msg =
         \\🔄 Creating account...
         \\
     ;
     _ = libssh.ssh_channel_write(channel, creating_msg);
-    
+
     // Hash password
     const password_hash = try hashPassword(handler.allocator, password);
     defer handler.allocator.free(password_hash);
-    
+
     // Insert user
     const user_id = handler.db.insertUser(username, email, password_hash) catch |err| {
         if (err == database.DatabaseError.StepFailed) {
-            const error_msg = 
+            const error_msg =
                 \\❌ Registration failed. Username or email may already exist.
                 \\
                 \\
@@ -515,9 +527,9 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         }
         return err;
     };
-    
+
     // Success message
-    const success_msg = try std.fmt.allocPrint(handler.allocator, 
+    const success_msg = try std.fmt.allocPrint(handler.allocator,
         \\✅ Registration successful!
         \\   User ID: {d}
         \\   You can now login with your credentials.
@@ -525,15 +537,15 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         \\Press Enter to continue...
     , .{user_id});
     defer handler.allocator.free(success_msg);
-    
+
     _ = libssh.ssh_channel_write(channel, success_msg);
-    
+
     // Wait for Enter
     _ = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
 }
 
 fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
-    const login_header = 
+    const login_header =
         \\
         \\┌─ User Login ────────────────────────┐
         \\│ Sign in to your Maigo account      │
@@ -541,23 +553,23 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         \\
         \\👤 Username: 
     ;
-    
+
     if (libssh.ssh_channel_write(channel, login_header) < 0) {
         return error.ChannelWriteFailed;
     }
-    
+
     // Read username
     var buffer: [256]u8 = undefined;
     const bytes_read = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
-    
+
     if (bytes_read <= 0) {
         return error.ReadTimeout;
     }
-    
+
     const username = std.mem.trim(u8, buffer[0..@intCast(bytes_read)], " \r\n\t");
-    
+
     if (username.len == 0) {
-        const error_msg = 
+        const error_msg =
             \\❌ Username cannot be empty.
             \\
             \\
@@ -565,25 +577,25 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Get password
-    const password_prompt = 
+    const password_prompt =
         \\🔒 Password: 
     ;
-    
+
     if (libssh.ssh_channel_write(channel, password_prompt) < 0) {
         return error.ChannelWriteFailed;
     }
-    
+
     const password_bytes = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
     if (password_bytes <= 0) {
         return error.ReadTimeout;
     }
-    
+
     const password = std.mem.trim(u8, buffer[0..@intCast(password_bytes)], " \r\n\t");
-    
+
     if (password.len == 0) {
-        const error_msg = 
+        const error_msg =
             \\❌ Password cannot be empty.
             \\
             \\
@@ -591,18 +603,18 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Authenticate
-    const auth_msg = 
+    const auth_msg =
         \\🔄 Authenticating...
         \\
     ;
     _ = libssh.ssh_channel_write(channel, auth_msg);
-    
+
     // Verify credentials
     const user_result = try handler.db.getUserByUsername(username);
     if (user_result == null) {
-        const error_msg = 
+        const error_msg =
             \\❌ Invalid username or password.
             \\
             \\
@@ -610,15 +622,15 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     var authenticated_user = user_result.?;
     defer authenticated_user.deinit(handler.allocator);
-    
+
     const password_hash = try hashPassword(handler.allocator, password);
     defer handler.allocator.free(password_hash);
-    
+
     if (!std.mem.eql(u8, authenticated_user.password_hash, password_hash)) {
-        const error_msg = 
+        const error_msg =
             \\❌ Invalid username or password.
             \\
             \\
@@ -626,9 +638,9 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         _ = libssh.ssh_channel_write(channel, error_msg);
         return;
     }
-    
+
     // Success
-    const success_msg = try std.fmt.allocPrint(handler.allocator, 
+    const success_msg = try std.fmt.allocPrint(handler.allocator,
         \\✅ Login successful!
         \\   Welcome back, {s}!
         \\
@@ -642,9 +654,9 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         \\Press Enter to continue...
     , .{authenticated_user.username});
     defer handler.allocator.free(success_msg);
-    
+
     _ = libssh.ssh_channel_write(channel, success_msg);
-    
+
     // Wait for Enter
     _ = libssh.ssh_channel_read_timeout(channel, &buffer, 0, 30000);
 }

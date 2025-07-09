@@ -228,6 +228,18 @@ pub fn ssh_set_log_level(level: c_int) c_int {
     return c.ssh_set_log_level(level);
 }
 
+pub fn ssh_message_channel_request_pty_term(msg: *SSHMessage) [*:0]const u8 {
+    return c.ssh_message_channel_request_pty_term(@ptrCast(msg));
+}
+
+pub fn ssh_message_channel_request_pty_width(msg: *SSHMessage) c_int {
+    return c.ssh_message_channel_request_pty_width(@ptrCast(msg));
+}
+
+pub fn ssh_message_channel_request_pty_height(msg: *SSHMessage) c_int {
+    return c.ssh_message_channel_request_pty_height(@ptrCast(msg));
+}
+
 // Higher-level Zig wrappers for easier use
 pub const SSHServer = struct {
     allocator: std.mem.Allocator,
