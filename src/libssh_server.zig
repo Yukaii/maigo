@@ -1,6 +1,7 @@
 const std = @import("std");
 const libssh = @import("libssh.zig");
 const database = @import("database.zig");
+const SSHTUI = @import("ssh_tui.zig").VaxisTUI;
 
 pub const LibSSHServer = struct {
     allocator: std.mem.Allocator,
@@ -198,8 +199,8 @@ pub const LibSSHServer = struct {
             }
 
             if (shell_requested) {
-                // Start TUI session
-                try startTuiSession(&handler, ch);
+                // Start enhanced VaxisTUI session
+                try startVaxisTuiSession(&handler, ch);
             }
         }
     }
@@ -307,6 +308,25 @@ fn authenticateUser(handler: *ConnectionHandler, user: [*:0]const u8, password: 
     // For demo purposes, accept any authentication
     // In production, verify against the database
     return true;
+}
+
+fn startVaxisTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
+    std.debug.print("Starting SSH TUI session\n", .{});
+
+    // Initialize the enhanced TUI
+    var tui = SSHTUI.init(handler.allocator, handler.db, channel) catch |err| {
+        std.debug.print("Failed to initialize SSH TUI: {}\n", .{err});
+        // Fall back to basic TUI
+        return startTuiSession(handler, channel);
+    };
+    defer tui.deinit();
+
+    // Run the enhanced TUI
+    tui.run() catch |err| {
+        std.debug.print("SSH TUI error: {}\n", .{err});
+        // Fall back to basic TUI
+        return startTuiSession(handler, channel);
+    };
 }
 
 fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
