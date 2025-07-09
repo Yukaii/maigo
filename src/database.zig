@@ -4,6 +4,28 @@ const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
+// CLI Client fixture constants
+const CLI_CLIENT_ID = "maigo-cli";
+const CLI_CLIENT_SECRET = "cli-secret-fixed-deterministic-value-for-embedded-client";
+const CLI_CLIENT_NAME = "Maigo CLI";
+const CLI_CLIENT_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob";
+
+pub const CliClientCredentials = struct {
+    client_id: []const u8,
+    client_secret: []const u8,
+    name: []const u8,
+    redirect_uri: []const u8,
+};
+
+pub fn getCliClientCredentials() CliClientCredentials {
+    return CliClientCredentials{
+        .client_id = CLI_CLIENT_ID,
+        .client_secret = CLI_CLIENT_SECRET,
+        .name = CLI_CLIENT_NAME,
+        .redirect_uri = CLI_CLIENT_REDIRECT_URI,
+    };
+}
+
 pub const DatabaseError = error{
     OpenFailed,
     PrepareFailed,
@@ -162,6 +184,9 @@ pub const Database = struct {
         try self.exec("CREATE INDEX IF NOT EXISTS idx_authorization_codes_user_id ON authorization_codes(user_id);");
         try self.exec("CREATE INDEX IF NOT EXISTS idx_access_tokens_client_id ON access_tokens(client_id);");
         try self.exec("CREATE INDEX IF NOT EXISTS idx_access_tokens_user_id ON access_tokens(user_id);");
+        
+        // Insert CLI client fixture
+        try self.insertCliClientFixture();
     }
     
     fn exec(self: *Database, sql: []const u8) !void {
@@ -173,6 +198,58 @@ pub const Database = struct {
             std.debug.print("SQL execution failed: {s}\n", .{c.sqlite3_errmsg(self.db)});
             return DatabaseError.ExecFailed;
         }
+    }
+    
+    fn insertCliClientFixture(self: *Database) !void {
+        // Check if CLI client already exists
+        const existing_client = try self.getOAuthClient(CLI_CLIENT_ID);
+        if (existing_client) |client_data| {
+            // Client already exists, clean up and return
+            self.allocator.free(client_data.id);
+            self.allocator.free(client_data.secret);
+            self.allocator.free(client_data.name);
+            self.allocator.free(client_data.redirect_uri);
+            return;
+        }
+        
+        // Insert CLI client fixture
+        const sql = "INSERT OR IGNORE INTO oauth_clients (id, secret, name, redirect_uri, created_at) VALUES (?, ?, ?, ?, ?)";
+        const sql_cstr = try self.allocator.dupeZ(u8, sql);
+        defer self.allocator.free(sql_cstr);
+        
+        var stmt: ?*c.sqlite3_stmt = null;
+        var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
+        if (result != c.SQLITE_OK) {
+            return DatabaseError.PrepareFailed;
+        }
+        defer _ = c.sqlite3_finalize(stmt);
+        
+        const client_id_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_ID);
+        defer self.allocator.free(client_id_cstr);
+        
+        const client_secret_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_SECRET);
+        defer self.allocator.free(client_secret_cstr);
+        
+        const client_name_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_NAME);
+        defer self.allocator.free(client_name_cstr);
+        
+        const redirect_uri_cstr = try self.allocator.dupeZ(u8, CLI_CLIENT_REDIRECT_URI);
+        defer self.allocator.free(redirect_uri_cstr);
+        
+        const now = std.time.timestamp();
+        
+        _ = c.sqlite3_bind_text(stmt, 1, client_id_cstr, -1, null);
+        _ = c.sqlite3_bind_text(stmt, 2, client_secret_cstr, -1, null);
+        _ = c.sqlite3_bind_text(stmt, 3, client_name_cstr, -1, null);
+        _ = c.sqlite3_bind_text(stmt, 4, redirect_uri_cstr, -1, null);
+        _ = c.sqlite3_bind_int64(stmt, 5, now);
+        
+        result = c.sqlite3_step(stmt);
+        if (result != c.SQLITE_DONE) {
+            return DatabaseError.StepFailed;
+        }
+        
+        std.debug.print("CLI OAuth client fixture inserted: {s}\n", .{CLI_CLIENT_ID});
     }
     
     pub fn insertUrl(self: *Database, short_code: []const u8, target_url: []const u8, user_id: ?u64) !u64 {
