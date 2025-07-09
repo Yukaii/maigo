@@ -52,6 +52,9 @@ Maigo is a wildcard subdomain supported URL shortener service built with Zig, fe
 
 ## Development Commands
 ```bash
+# First-time setup (initialize submodules and build dependencies)
+zig build setup
+
 # Build the service (default: install)
 zig build
 
@@ -64,18 +67,21 @@ zig build test
 # Build in release mode
 zig build --release=fast
 
-# Watch mode (rebuild on file changes)
-zig build --watch
+# Clean build artifacts and dependencies
+zig build clean
+
+# Build only libssh dependency
+zig build build-libssh
 
 # List available build steps
 zig build -l
 
+# Watch mode (rebuild on file changes)
+zig build --watch
+
 # Future commands (to be implemented):
 # Start Let's Encrypt worker
 zig build certbot
-
-# SSH TUI server
-zig build ssh-server
 
 # CLI companion
 zig build cli

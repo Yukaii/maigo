@@ -15,6 +15,31 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // libssh build configuration
+    const libssh_build_dir = "deps/libssh/build";
+    const libssh_lib_dir = b.fmt("{s}/lib", .{libssh_build_dir});
+    const libssh_include_dir = "deps/libssh/include";
+
+    // Step to build libssh if needed
+    const build_libssh_step = b.step("build-libssh", "Build libssh dependency");
+    const libssh_build_cmd = b.addSystemCommand(&.{
+        "sh", "-c", 
+        "cd deps/libssh && " ++
+        "mkdir -p build && " ++
+        "cd build && " ++
+        "cmake .. " ++
+        "-DCMAKE_BUILD_TYPE=Release " ++
+        "-DWITH_EXAMPLES=OFF " ++
+        "-DWITH_SERVER=ON " ++
+        "-DWITH_SFTP=ON " ++
+        "-DWITH_ZLIB=ON " ++
+        "-DUNIT_TESTING=OFF " ++
+        "-DWITH_GSSAPI=OFF " ++
+        "-DBUILD_SHARED_LIBS=ON && " ++
+        "make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+    });
+    build_libssh_step.dependOn(&libssh_build_cmd.step);
+
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Every executable or library we compile will be based on one or more modules.
@@ -53,14 +78,11 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
 
-    // Link SQLite3 and libssh to the library
-    lib.linkLibC();
-    lib.linkSystemLibrary("sqlite3");
+    // Configure library linking
+    configureLibraryLinking(b, lib, libssh_include_dir, libssh_lib_dir);
     
-    // Add libssh include path and library
-    lib.addIncludePath(b.path("deps/libssh-0.11.0/include"));
-    lib.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
-    lib.linkSystemLibrary("ssh");
+    // Ensure libssh is built before compiling the library
+    lib.step.dependOn(build_libssh_step);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -74,14 +96,11 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    // Link SQLite3 and libssh to the executable
-    exe.linkLibC();
-    exe.linkSystemLibrary("sqlite3");
+    // Configure executable linking
+    configureLibraryLinking(b, exe, libssh_include_dir, libssh_lib_dir);
     
-    // Add libssh include path and library
-    exe.addIncludePath(b.path("deps/libssh-0.11.0/include"));
-    exe.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
-    exe.linkSystemLibrary("ssh");
+    // Ensure libssh is built before compiling the executable
+    exe.step.dependOn(build_libssh_step);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -117,14 +136,9 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
 
-    // Link SQLite3 and libssh to the test executable
-    lib_unit_tests.linkLibC();
-    lib_unit_tests.linkSystemLibrary("sqlite3");
-    
-    // Add libssh include path and library
-    lib_unit_tests.addIncludePath(b.path("deps/libssh-0.11.0/include"));
-    lib_unit_tests.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
-    lib_unit_tests.linkSystemLibrary("ssh");
+    // Configure test library linking
+    configureLibraryLinking(b, lib_unit_tests, libssh_include_dir, libssh_lib_dir);
+    lib_unit_tests.step.dependOn(build_libssh_step);
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -132,14 +146,9 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    // Link SQLite3 and libssh to the test executable
-    exe_unit_tests.linkLibC();
-    exe_unit_tests.linkSystemLibrary("sqlite3");
-    
-    // Add libssh include path and library
-    exe_unit_tests.addIncludePath(b.path("deps/libssh-0.11.0/include"));
-    exe_unit_tests.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
-    exe_unit_tests.linkSystemLibrary("ssh");
+    // Configure test executable linking
+    configureLibraryLinking(b, exe_unit_tests, libssh_include_dir, libssh_lib_dir);
+    exe_unit_tests.step.dependOn(build_libssh_step);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
@@ -149,4 +158,40 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Custom build steps for development
+    const clean_step = b.step("clean", "Clean build artifacts and libssh build");
+    const clean_cmd = b.addSystemCommand(&.{
+        "sh", "-c",
+        "rm -rf zig-out zig-cache deps/libssh/build"
+    });
+    clean_step.dependOn(&clean_cmd.step);
+
+    const setup_step = b.step("setup", "Initialize submodules and build dependencies");
+    const setup_cmd = b.addSystemCommand(&.{
+        "sh", "-c",
+        "git submodule update --init --recursive && " ++
+        "cd deps/libssh && git checkout libssh-0.11.2"
+    });
+    setup_step.dependOn(&setup_cmd.step);
+    setup_step.dependOn(build_libssh_step);
+}
+
+fn configureLibraryLinking(b: *std.Build, compile_step: *std.Build.Step.Compile, libssh_include_dir: []const u8, libssh_lib_dir: []const u8) void {
+    // Link C standard library
+    compile_step.linkLibC();
+    
+    // Link SQLite3
+    compile_step.linkSystemLibrary("sqlite3");
+    
+    // Add libssh include path and library
+    compile_step.addIncludePath(b.path(libssh_include_dir));
+    compile_step.addLibraryPath(b.path(libssh_lib_dir));
+    compile_step.linkSystemLibrary("ssh");
+    
+    // For macOS, we might need additional system libraries
+    if (compile_step.rootModuleTarget().os.tag == .macos) {
+        compile_step.linkFramework("Security");
+        compile_step.linkFramework("CoreFoundation");
+    }
 }
