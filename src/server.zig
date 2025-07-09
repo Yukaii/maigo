@@ -2,11 +2,13 @@ const std = @import("std");
 const net = std.net;
 const testing = std.testing;
 const shortener = @import("shortener.zig");
+const database = @import("database.zig");
 
 pub const ServerConfig = struct {
     host: []const u8 = "127.0.0.1",
     port: u16 = 8080,
     base_domain: []const u8 = "maigo.dev",
+    db_path: []const u8 = "maigo.db",
 };
 
 pub const HttpRequest = struct {
@@ -57,13 +59,19 @@ pub const RouteHandler = struct {
     allocator: std.mem.Allocator,
     config: ServerConfig,
     url_shortener: shortener.Shortener,
+    db: database.Database,
 
-    pub fn init(allocator: std.mem.Allocator, config: ServerConfig) RouteHandler {
+    pub fn init(allocator: std.mem.Allocator, config: ServerConfig) !RouteHandler {
         return RouteHandler{
             .allocator = allocator,
             .config = config,
             .url_shortener = shortener.Shortener.init(allocator),
+            .db = try database.Database.init(allocator, config.db_path),
         };
+    }
+    
+    pub fn deinit(self: *RouteHandler) void {
+        self.db.deinit();
     }
 
     pub fn handleRequest(self: *RouteHandler, request: HttpRequest, writer: anytype) !void {
@@ -118,19 +126,34 @@ pub const RouteHandler = struct {
     }
 
     fn handleRedirect(self: *RouteHandler, writer: anytype, short_code: []const u8) !void {
-        // For now, just return a mock redirect
-        // TODO: Look up actual URL from database
-        const mock_url = "https://example.com";
+        // Look up URL from database
+        var url_record = self.db.getUrlByShortCode(short_code) catch |err| {
+            std.debug.print("Database error looking up {s}: {}\n", .{ short_code, err });
+            try self.sendNotFound(writer);
+            return;
+        };
         
-        std.debug.print("Redirecting {s} to {s}\n", .{ short_code, mock_url });
+        if (url_record) |*url| {
+            defer url.deinit(self.allocator);
+            
+            std.debug.print("Redirecting {s} to {s}\n", .{ short_code, url.target_url });
+            
+            // Increment hit counter
+            self.db.incrementHits(short_code) catch |err| {
+                std.debug.print("Failed to increment hits for {s}: {}\n", .{ short_code, err });
+            };
 
-        const response = try std.fmt.allocPrint(self.allocator,
-            "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n",
-            .{mock_url}
-        );
-        defer self.allocator.free(response);
-        
-        try writer.writeAll(response);
+            const response = try std.fmt.allocPrint(self.allocator,
+                "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n",
+                .{url.target_url}
+            );
+            defer self.allocator.free(response);
+            
+            try writer.writeAll(response);
+        } else {
+            std.debug.print("Short code {s} not found\n", .{short_code});
+            try self.sendNotFound(writer);
+        }
     }
 
     fn handleMainDomain(self: *RouteHandler, writer: anytype, path: []const u8) !void {
@@ -146,14 +169,56 @@ pub const RouteHandler = struct {
     fn handleShorten(self: *RouteHandler, writer: anytype, body: []const u8) !void {
         std.debug.print("Shorten request body: {s}\n", .{body});
 
-        // For now, generate a random short code
-        var short_code = try self.url_shortener.generateRandom(6);
+        // Parse JSON to get target URL
+        // For now, assume simple JSON: {"url": "https://example.com"}
+        const target_url = self.parseTargetUrl(body) orelse {
+            try self.sendBadRequest(writer, "Invalid JSON or missing 'url' field");
+            return;
+        };
+        defer self.allocator.free(target_url);
+
+        // Generate short code with collision detection
+        var short_code: shortener.ShortCode = undefined;
+        var attempts: u32 = 0;
+        const max_attempts = 10;
+        
+        while (attempts < max_attempts) {
+            short_code = try self.url_shortener.generateRandom(6);
+            
+            // Check if this code already exists
+            const exists = self.db.shortCodeExists(short_code.code) catch |err| {
+                std.debug.print("Database error checking collision: {}\n", .{err});
+                short_code.deinit();
+                try self.sendInternalError(writer);
+                return;
+            };
+            
+            if (!exists) break;
+            
+            short_code.deinit();
+            attempts += 1;
+        }
+        
+        if (attempts >= max_attempts) {
+            try self.sendInternalError(writer);
+            return;
+        }
+        
         defer short_code.deinit();
+        
+        // Store in database
+        const url_id = self.db.insertUrl(short_code.code, target_url, null) catch |err| {
+            std.debug.print("Database error inserting URL: {}\n", .{err});
+            try self.sendInternalError(writer);
+            return;
+        };
+        
+        std.debug.print("Created short URL: {s} -> {s} (ID: {d})\n", .{ short_code.code, target_url, url_id });
 
         // Create response JSON
         const json_response = try std.fmt.allocPrint(self.allocator, 
-            "{{\"short_code\":\"{s}\",\"short_url\":\"https://{s}.{s}\"}}", 
-            .{ short_code.code, short_code.code, self.config.base_domain }
+            "{{\"short_code\":\"{s}\",\"short_url\":\"https://{s}.{s}\",\"target_url\":\"{s}\"}}", 
+            .{ short_code.code, short_code.code, self.config.base_domain, target_url }
         );
         defer self.allocator.free(json_response);
 
@@ -164,6 +229,18 @@ pub const RouteHandler = struct {
         defer self.allocator.free(response);
         
         try writer.writeAll(response);
+    }
+    
+    fn parseTargetUrl(self: *RouteHandler, body: []const u8) ?[]u8 {
+        // Simple JSON parser for {"url": "https://example.com"}
+        const url_prefix = "\"url\":\"";
+        const url_start = std.mem.indexOf(u8, body, url_prefix) orelse return null;
+        const value_start = url_start + url_prefix.len;
+        
+        const value_end = std.mem.indexOfPos(u8, body, value_start, "\"") orelse return null;
+        const url_value = body[value_start..value_end];
+        
+        return self.allocator.dupe(u8, url_value) catch null;
     }
 
     fn sendWelcome(self: *RouteHandler, writer: anytype) !void {
@@ -228,6 +305,28 @@ pub const RouteHandler = struct {
         
         try writer.writeAll(response);
     }
+    
+    fn sendBadRequest(self: *RouteHandler, writer: anytype, message: []const u8) !void {
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ message.len, message }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
+    
+    fn sendInternalError(self: *RouteHandler, writer: anytype) !void {
+        const error_message = "500 Internal Server Error";
+        
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ error_message.len, error_message }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
 };
 
 pub const Server = struct {
@@ -235,12 +334,16 @@ pub const Server = struct {
     config: ServerConfig,
     handler: RouteHandler,
 
-    pub fn init(allocator: std.mem.Allocator, config: ServerConfig) Server {
+    pub fn init(allocator: std.mem.Allocator, config: ServerConfig) !Server {
         return Server{
             .allocator = allocator,
             .config = config,
-            .handler = RouteHandler.init(allocator, config),
+            .handler = try RouteHandler.init(allocator, config),
         };
+    }
+    
+    pub fn deinit(self: *Server) void {
+        self.handler.deinit();
     }
 
     pub fn start(self: *Server) !void {
@@ -285,8 +388,9 @@ pub const Server = struct {
 
 test "parse subdomain" {
     const allocator = testing.allocator;
-    const config = ServerConfig{ .base_domain = "maigo.dev" };
-    var handler = RouteHandler.init(allocator, config);
+    const config = ServerConfig{ .base_domain = "maigo.dev", .db_path = ":memory:" };
+    var handler = try RouteHandler.init(allocator, config);
+    defer handler.deinit();
 
     // Test valid subdomain
     const sub1 = try handler.parseSubdomain("abc.maigo.dev");

@@ -17,9 +17,11 @@ pub fn main() !void {
             .host = "127.0.0.1",
             .port = 8080,
             .base_domain = "maigo.dev",
+            .db_path = "maigo.db",
         };
         
-        var http_server = server.Server.init(allocator, config);
+        var http_server = try server.Server.init(allocator, config);
+        defer http_server.deinit();
         try http_server.start();
     } else {
         // Demo mode

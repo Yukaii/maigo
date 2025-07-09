@@ -3,6 +3,7 @@ const testing = std.testing;
 
 pub const shortener = @import("shortener.zig");
 pub const server = @import("server.zig");
+pub const database = @import("database.zig");
 
 pub export fn add(a: i32, b: i32) i32 {
     return a + b;
