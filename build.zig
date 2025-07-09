@@ -53,9 +53,14 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
 
-    // Link SQLite3 to the library
+    // Link SQLite3 and libssh to the library
     lib.linkLibC();
     lib.linkSystemLibrary("sqlite3");
+    
+    // Add libssh include path and library
+    lib.addIncludePath(b.path("deps/libssh-0.11.0/include"));
+    lib.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
+    lib.linkSystemLibrary("ssh");
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -69,9 +74,14 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    // Link SQLite3 to the executable
+    // Link SQLite3 and libssh to the executable
     exe.linkLibC();
     exe.linkSystemLibrary("sqlite3");
+    
+    // Add libssh include path and library
+    exe.addIncludePath(b.path("deps/libssh-0.11.0/include"));
+    exe.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
+    exe.linkSystemLibrary("ssh");
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -107,9 +117,14 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
 
-    // Link SQLite3 to the test executable
+    // Link SQLite3 and libssh to the test executable
     lib_unit_tests.linkLibC();
     lib_unit_tests.linkSystemLibrary("sqlite3");
+    
+    // Add libssh include path and library
+    lib_unit_tests.addIncludePath(b.path("deps/libssh-0.11.0/include"));
+    lib_unit_tests.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
+    lib_unit_tests.linkSystemLibrary("ssh");
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -117,9 +132,14 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    // Link SQLite3 to the test executable
+    // Link SQLite3 and libssh to the test executable
     exe_unit_tests.linkLibC();
     exe_unit_tests.linkSystemLibrary("sqlite3");
+    
+    // Add libssh include path and library
+    exe_unit_tests.addIncludePath(b.path("deps/libssh-0.11.0/include"));
+    exe_unit_tests.addLibraryPath(b.path("deps/libssh-0.11.0/build/lib"));
+    exe_unit_tests.linkSystemLibrary("ssh");
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

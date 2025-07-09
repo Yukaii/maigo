@@ -13,3 +13,6 @@ zig-out/
 
 # CLI client credentials
 maigo-cli.json
+
+# SSH host keys
+tmp_keys/

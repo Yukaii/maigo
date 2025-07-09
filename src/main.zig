@@ -31,7 +31,7 @@ pub fn main() !void {
         defer http_server.deinit();
         try http_server.start();
     } else if (args.len > 1 and std.mem.eql(u8, args[1], "ssh-server")) {
-        // Start SSH TUI server for user registration
+        // Start libssh server (recommended)
         const config = server.ServerConfig{
             .host = "127.0.0.1",
             .port = 8080,
@@ -42,8 +42,9 @@ pub fn main() !void {
         var db = try database.Database.init(allocator, config.db_path);
         defer db.deinit();
 
-        var tui_server = ssh_tui.SshTuiServer.init(allocator, &db, "127.0.0.1", 2222);
-        try tui_server.start();
+        var ssh_srv = try libssh_server.LibSSHServer.init(allocator, &db, "127.0.0.1", 2222);
+        defer ssh_srv.deinit();
+        try ssh_srv.start();
     } else if (args.len > 1 and std.mem.eql(u8, args[1], "create-client")) {
         // Create OAuth client
         if (args.len < 4) {
@@ -101,7 +102,7 @@ pub fn main() !void {
         try stdout.print("Version: 0.1.0\n", .{});
         try stdout.print("\nUsage:\n", .{});
         try stdout.print("  maigo server                        - Start HTTP server\n", .{});
-        try stdout.print("  maigo ssh-server                    - Start SSH TUI server for registration\n", .{});
+        try stdout.print("  maigo ssh-server                    - Start SSH server for registration\n", .{});
         try stdout.print("  maigo login                         - Login with username/password\n", .{});
         try stdout.print("  maigo auth url                      - Get CLI authorization URL\n", .{});
         try stdout.print("  maigo auth token <code>             - Exchange auth code for token\n", .{});
@@ -166,7 +167,7 @@ const shortener = lib.shortener;
 const server = lib.server;
 const database = lib.database;
 const oauth = lib.oauth;
-const ssh_tui = lib.ssh_tui;
+const libssh_server = lib.libssh_server;
 
 const CLI_CLIENT_FILE = "maigo-cli.json";
 

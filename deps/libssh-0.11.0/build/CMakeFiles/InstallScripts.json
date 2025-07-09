@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/yukai/Projects/Personal/maigo/deps/libssh-0.11.0/build/cmake_install.cmake",
+		"/Users/yukai/Projects/Personal/maigo/deps/libssh-0.11.0/build/doc/cmake_install.cmake",
+		"/Users/yukai/Projects/Personal/maigo/deps/libssh-0.11.0/build/include/cmake_install.cmake",
+		"/Users/yukai/Projects/Personal/maigo/deps/libssh-0.11.0/build/include/libssh/cmake_install.cmake",
+		"/Users/yukai/Projects/Personal/maigo/deps/libssh-0.11.0/build/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
