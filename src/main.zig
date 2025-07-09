@@ -3,15 +3,55 @@
 //! is to delete this file and start with root.zig instead.
 
 pub fn main() !void {
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    try stdout.print("Maigo - Wildcard Subdomain URL Shortener\n", .{});
-    try stdout.print("Version: 0.1.0\n", .{});
-    try stdout.print("Hello, World!\n", .{});
+    // Parse command line arguments
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    try bw.flush();
+    if (args.len > 1 and std.mem.eql(u8, args[1], "server")) {
+        // Start HTTP server
+        const config = server.ServerConfig{
+            .host = "127.0.0.1",
+            .port = 8080,
+            .base_domain = "maigo.dev",
+        };
+        
+        var http_server = server.Server.init(allocator, config);
+        try http_server.start();
+    } else {
+        // Demo mode
+        const stdout_file = std.io.getStdOut().writer();
+        var bw = std.io.bufferedWriter(stdout_file);
+        const stdout = bw.writer();
+
+        try stdout.print("Maigo - Wildcard Subdomain URL Shortener\n", .{});
+        try stdout.print("Version: 0.1.0\n", .{});
+        try stdout.print("\nUsage:\n", .{});
+        try stdout.print("  maigo server    - Start HTTP server\n", .{});
+        try stdout.print("  maigo          - Show this demo\n", .{});
+        
+        // Demo shortener functionality
+        var url_shortener = shortener.Shortener.init(allocator);
+        
+        // Test encoding
+        var code = try url_shortener.encodeId(12345);
+        defer code.deinit();
+        try stdout.print("\nDemo - Encoded ID 12345: {s}\n", .{code.code});
+        
+        // Test decoding
+        const decoded = try shortener.Shortener.decodeId(code.code);
+        try stdout.print("Demo - Decoded back: {d}\n", .{decoded});
+        
+        // Test random generation
+        var random_code = try url_shortener.generateRandom(6);
+        defer random_code.deinit();
+        try stdout.print("Demo - Random 6-char code: {s}\n", .{random_code.code});
+
+        try bw.flush();
+    }
 }
 
 test "simple test" {
@@ -45,3 +85,5 @@ const std = @import("std");
 
 /// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
 const lib = @import("maigo_lib");
+const shortener = lib.shortener;
+const server = lib.server;
