@@ -172,6 +172,10 @@ pub fn ssh_message_auth_reply_default(msg: *SSHMessage) c_int {
     return c.ssh_message_reply_default(@ptrCast(msg));
 }
 
+pub fn ssh_message_reply_default(msg: *SSHMessage) c_int {
+    return c.ssh_message_reply_default(@ptrCast(msg));
+}
+
 pub fn ssh_message_channel_request_open_reply_accept(msg: *SSHMessage) ?*SSHChannel {
     return @ptrCast(c.ssh_message_channel_request_open_reply_accept(@ptrCast(msg)));
 }
