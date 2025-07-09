@@ -17,6 +17,7 @@ pub const HttpRequest = struct {
     path: []const u8,
     host: []const u8,
     body: []const u8,
+    authorization: ?[]const u8,
     
     pub fn parse(allocator: std.mem.Allocator, raw_request: []const u8) !HttpRequest {
         var lines = std.mem.splitSequence(u8, raw_request, "\r\n");
@@ -29,11 +30,14 @@ pub const HttpRequest = struct {
         
         // Parse headers
         var host: []const u8 = "";
+        var authorization: ?[]const u8 = null;
         while (lines.next()) |line| {
             if (line.len == 0) break; // Empty line marks end of headers
             
             if (std.mem.startsWith(u8, line, "Host: ")) {
                 host = line[6..];
+            } else if (std.mem.startsWith(u8, line, "Authorization: ")) {
+                authorization = try allocator.dupe(u8, line[15..]);
             }
         }
         
@@ -45,6 +49,7 @@ pub const HttpRequest = struct {
             .path = try allocator.dupe(u8, path),
             .host = try allocator.dupe(u8, host),
             .body = try allocator.dupe(u8, body),
+            .authorization = authorization,
         };
     }
     
@@ -53,6 +58,9 @@ pub const HttpRequest = struct {
         allocator.free(self.path);
         allocator.free(self.host);
         allocator.free(self.body);
+        if (self.authorization) |auth| {
+            allocator.free(auth);
+        }
     }
 };
 
@@ -87,7 +95,9 @@ pub const RouteHandler = struct {
         defer if (subdomain) |sub| self.allocator.free(sub);
 
         if (std.mem.eql(u8, request.method, "GET")) {
-            if (std.mem.startsWith(u8, request.path, "/oauth/authorize")) {
+            if (std.mem.startsWith(u8, request.path, "/api/urls")) {
+                try self.handleProtectedUrlsApi(writer, request);
+            } else if (std.mem.startsWith(u8, request.path, "/oauth/authorize")) {
                 try self.handleOAuthAuthorize(writer, request.path);
             } else if (subdomain) |sub| {
                 // Subdomain request - redirect to full URL
@@ -97,7 +107,9 @@ pub const RouteHandler = struct {
                 try self.handleMainDomain(writer, request.path);
             }
         } else if (std.mem.eql(u8, request.method, "POST")) {
-            if (std.mem.eql(u8, request.path, "/api/shorten")) {
+            if (std.mem.startsWith(u8, request.path, "/api/urls")) {
+                try self.handleProtectedUrlsApi(writer, request);
+            } else if (std.mem.eql(u8, request.path, "/api/shorten")) {
                 try self.handleShorten(writer, request.body);
             } else if (std.mem.eql(u8, request.path, "/oauth/token")) {
                 try self.handleOAuthToken(writer, request.body);
@@ -107,6 +119,138 @@ pub const RouteHandler = struct {
         } else {
             try self.sendMethodNotAllowed(writer);
         }
+    }
+    
+    fn handleProtectedUrlsApi(self: *RouteHandler, writer: anytype, request: HttpRequest) !void {
+        // Require authentication for all /api/urls endpoints
+        const access_token = try self.requireAuthentication(request, writer);
+        if (access_token == null) return; // Authentication failed, response already sent
+        
+        var token = access_token.?;
+        defer token.deinit(self.allocator);
+        
+        if (std.mem.eql(u8, request.method, "GET")) {
+            if (std.mem.eql(u8, request.path, "/api/urls")) {
+                // List all URLs for this user
+                try self.handleListUrls(writer, token.user_id);
+            } else if (std.mem.startsWith(u8, request.path, "/api/urls/")) {
+                // Get specific URL details
+                const url_id_str = request.path[10..]; // Skip "/api/urls/"
+                const url_id = std.fmt.parseInt(u64, url_id_str, 10) catch {
+                    try self.sendBadRequest(writer, "Invalid URL ID");
+                    return;
+                };
+                try self.handleGetUrl(writer, token.user_id, url_id);
+            } else {
+                try self.sendNotFound(writer);
+            }
+        } else if (std.mem.eql(u8, request.method, "POST")) {
+            if (std.mem.eql(u8, request.path, "/api/urls")) {
+                // Create new short URL (authenticated version)
+                try self.handleCreateUrl(writer, request.body, token.user_id);
+            } else {
+                try self.sendNotFound(writer);
+            }
+        } else {
+            try self.sendMethodNotAllowed(writer);
+        }
+    }
+    
+    fn handleListUrls(self: *RouteHandler, writer: anytype, user_id: u64) !void {
+        // TODO: Implement database method to get all URLs for a user
+        // For now, return a simple JSON response
+        const json_response = try std.fmt.allocPrint(self.allocator,
+            "{{\"urls\":[],\"user_id\":{d}}}",
+            .{user_id}
+        );
+        defer self.allocator.free(json_response);
+
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ json_response.len, json_response }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
+    
+    fn handleGetUrl(self: *RouteHandler, writer: anytype, user_id: u64, url_id: u64) !void {
+        _ = user_id;
+        _ = url_id;
+        // TODO: Implement database method to get specific URL by ID and verify ownership
+        const json_response = "{\"error\":\"Not implemented yet\"}";
+
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 501 Not Implemented\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ json_response.len, json_response }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
+    
+    fn handleCreateUrl(self: *RouteHandler, writer: anytype, body: []const u8, user_id: u64) !void {
+        std.debug.print("Protected URL creation for user {d}: {s}\n", .{ user_id, body });
+        
+        // Parse JSON to get target URL
+        const target_url = self.parseTargetUrl(body) orelse {
+            try self.sendBadRequest(writer, "Invalid JSON or missing 'url' field");
+            return;
+        };
+        defer self.allocator.free(target_url);
+
+        // Generate short code with collision detection
+        var short_code: shortener.ShortCode = undefined;
+        var attempts: u32 = 0;
+        const max_attempts = 10;
+        
+        while (attempts < max_attempts) {
+            short_code = try self.url_shortener.generateRandom(6);
+            
+            // Check if this code already exists
+            const exists = self.db.shortCodeExists(short_code.code) catch |err| {
+                std.debug.print("Database error checking collision: {}\n", .{err});
+                short_code.deinit();
+                try self.sendInternalError(writer);
+                return;
+            };
+            
+            if (!exists) break;
+            
+            short_code.deinit();
+            attempts += 1;
+        }
+        
+        if (attempts >= max_attempts) {
+            try self.sendInternalError(writer);
+            return;
+        }
+        
+        defer short_code.deinit();
+        
+        // Store in database with user ownership
+        const url_id = self.db.insertUrl(short_code.code, target_url, user_id) catch |err| {
+            std.debug.print("Database error inserting URL: {}\n", .{err});
+            try self.sendInternalError(writer);
+            return;
+        };
+        
+        std.debug.print("Created authenticated short URL: {s} -> {s} (ID: {d}, User: {d})\n", .{ short_code.code, target_url, url_id, user_id });
+
+        // Create response JSON
+        const json_response = try std.fmt.allocPrint(self.allocator, 
+            "{{\"short_code\":\"{s}\",\"short_url\":\"https://{s}.{s}\",\"target_url\":\"{s}\",\"id\":{d}}}",
+            .{ short_code.code, short_code.code, self.config.base_domain, target_url, url_id }
+        );
+        defer self.allocator.free(json_response);
+
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ json_response.len, json_response }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
     }
 
     fn parseSubdomain(self: *RouteHandler, host: []const u8) !?[]u8 {
@@ -634,6 +778,46 @@ pub const RouteHandler = struct {
         
         const response = try std.fmt.allocPrint(self.allocator,
             "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}",
+            .{ error_message.len, error_message }
+        );
+        defer self.allocator.free(response);
+        
+        try writer.writeAll(response);
+    }
+    
+    fn authenticateRequest(self: *RouteHandler, request: HttpRequest) !?oauth.AccessToken {
+        // Look for Authorization header
+        const auth_header = request.authorization orelse return null;
+        
+        // Check for Bearer token
+        if (!std.mem.startsWith(u8, auth_header, "Bearer ")) {
+            return null;
+        }
+        
+        const token = auth_header[7..]; // Skip "Bearer "
+        
+        // Validate token
+        return self.oauth_server.validateToken(token) catch |err| switch (err) {
+            oauth.OAuthError.TokenExpired, oauth.OAuthError.InvalidToken => null,
+            else => return err,
+        };
+    }
+    
+    
+    fn requireAuthentication(self: *RouteHandler, request: HttpRequest, writer: anytype) !?oauth.AccessToken {
+        const access_token = try self.authenticateRequest(request);
+        if (access_token == null) {
+            try self.sendUnauthorized(writer);
+            return null;
+        }
+        return access_token;
+    }
+    
+    fn sendUnauthorized(self: *RouteHandler, writer: anytype) !void {
+        const error_message = "401 Unauthorized";
+        
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}",
             .{ error_message.len, error_message }
         );
         defer self.allocator.free(response);
