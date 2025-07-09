@@ -459,7 +459,7 @@ test "oauth authorization code flow" {
     try db.insertOAuthClient(client.id, client.secret, client.name, client.redirect_uri);
     
     // Create a test user
-    const user_id = try db.insertUser("testuser", "test@example.com");
+    const user_id = try db.insertUser("testuser", "test@example.com", "test_password_hash");
     
     // Create authorization request
     var auth_request = AuthorizeRequest{
@@ -573,7 +573,7 @@ test "oauth refresh token flow" {
     try db.insertOAuthClient(client.id, client.secret, client.name, client.redirect_uri);
     
     // Create a test user
-    const user_id = try db.insertUser("testuser", "test@example.com");
+    const user_id = try db.insertUser("testuser", "test@example.com", "test_password_hash");
     
     // Create authorization request
     var auth_request = AuthorizeRequest{
@@ -653,7 +653,7 @@ test "oauth token expiration" {
     try db.insertOAuthClient(client.id, client.secret, client.name, client.redirect_uri);
     
     // Create a test user
-    const user_id = try db.insertUser("testuser", "test@example.com");
+    const user_id = try db.insertUser("testuser", "test@example.com", "test_password_hash");
     
     // Create an access token with past expiration
     const expired_token = try oauth_server.generateRandomString(64);

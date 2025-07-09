@@ -53,11 +53,13 @@ pub const User = struct {
     id: u64,
     username: []const u8,
     email: []const u8,
+    password_hash: []const u8,
     created_at: i64,
     
     pub fn deinit(self: *User, allocator: std.mem.Allocator) void {
         allocator.free(self.username);
         allocator.free(self.email);
+        allocator.free(self.password_hash);
     }
 };
 
@@ -114,6 +116,7 @@ pub const Database = struct {
             \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
             \\    username TEXT UNIQUE NOT NULL,
             \\    email TEXT UNIQUE NOT NULL,
+            \\    password_hash TEXT NOT NULL,
             \\    created_at INTEGER NOT NULL
             \\);
         ;
@@ -715,8 +718,8 @@ pub const Database = struct {
         }
     }
     
-    pub fn insertUser(self: *Database, username: []const u8, email: []const u8) !u64 {
-        const sql = "INSERT INTO users (username, email, created_at) VALUES (?, ?, ?)";
+    pub fn insertUser(self: *Database, username: []const u8, email: []const u8, password_hash: []const u8) !u64 {
+        const sql = "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
         
@@ -733,11 +736,15 @@ pub const Database = struct {
         const email_cstr = try self.allocator.dupeZ(u8, email);
         defer self.allocator.free(email_cstr);
         
+        const password_hash_cstr = try self.allocator.dupeZ(u8, password_hash);
+        defer self.allocator.free(password_hash_cstr);
+        
         const now = std.time.timestamp();
         
         _ = c.sqlite3_bind_text(stmt, 1, username_cstr, -1, null);
         _ = c.sqlite3_bind_text(stmt, 2, email_cstr, -1, null);
-        _ = c.sqlite3_bind_int64(stmt, 3, now);
+        _ = c.sqlite3_bind_text(stmt, 3, password_hash_cstr, -1, null);
+        _ = c.sqlite3_bind_int64(stmt, 4, now);
         
         result = c.sqlite3_step(stmt);
         if (result != c.SQLITE_DONE) {
@@ -745,6 +752,45 @@ pub const Database = struct {
         }
         
         return @intCast(c.sqlite3_last_insert_rowid(self.db));
+    }
+    
+    pub fn getUserByUsername(self: *Database, username: []const u8) !?User {
+        const sql = "SELECT id, username, email, password_hash, created_at FROM users WHERE username = ?";
+        const sql_cstr = try self.allocator.dupeZ(u8, sql);
+        defer self.allocator.free(sql_cstr);
+        
+        var stmt: ?*c.sqlite3_stmt = null;
+        var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
+        if (result != c.SQLITE_OK) {
+            return DatabaseError.PrepareFailed;
+        }
+        defer _ = c.sqlite3_finalize(stmt);
+        
+        const username_cstr = try self.allocator.dupeZ(u8, username);
+        defer self.allocator.free(username_cstr);
+        
+        _ = c.sqlite3_bind_text(stmt, 1, username_cstr, -1, null);
+        
+        result = c.sqlite3_step(stmt);
+        if (result == c.SQLITE_ROW) {
+            const id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 0)));
+            const user_username = std.mem.span(c.sqlite3_column_text(stmt, 1));
+            const email = std.mem.span(c.sqlite3_column_text(stmt, 2));
+            const password_hash = std.mem.span(c.sqlite3_column_text(stmt, 3));
+            const created_at = c.sqlite3_column_int64(stmt, 4);
+            
+            return User{
+                .id = id,
+                .username = try self.allocator.dupe(u8, user_username),
+                .email = try self.allocator.dupe(u8, email),
+                .password_hash = try self.allocator.dupe(u8, password_hash),
+                .created_at = created_at,
+            };
+        } else if (result == c.SQLITE_DONE) {
+            return null;
+        } else {
+            return DatabaseError.StepFailed;
+        }
     }
 };
 
