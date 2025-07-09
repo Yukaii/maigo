@@ -22,9 +22,7 @@ pub fn build(b: *std.Build) void {
 
     // Step to build libssh if needed
     const build_libssh_step = b.step("build-libssh", "Build libssh dependency");
-    const libssh_build_cmd = b.addSystemCommand(&.{
-        "sh", "-c", 
-        "cd deps/libssh && " ++
+    const libssh_build_cmd = b.addSystemCommand(&.{ "sh", "-c", "cd deps/libssh && " ++
         "mkdir -p build && " ++
         "cd build && " ++
         "cmake .. " ++
@@ -36,8 +34,7 @@ pub fn build(b: *std.Build) void {
         "-DUNIT_TESTING=OFF " ++
         "-DWITH_GSSAPI=OFF " ++
         "-DBUILD_SHARED_LIBS=ON && " ++
-        "make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-    });
+        "make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)" });
     build_libssh_step.dependOn(&libssh_build_cmd.step);
 
     // This creates a "module", which represents a collection of source files alongside
@@ -80,7 +77,7 @@ pub fn build(b: *std.Build) void {
 
     // Configure library linking
     configureLibraryLinking(b, lib, libssh_include_dir, libssh_lib_dir);
-    
+
     // Ensure libssh is built before compiling the library
     lib.step.dependOn(build_libssh_step);
 
@@ -98,7 +95,7 @@ pub fn build(b: *std.Build) void {
 
     // Configure executable linking
     configureLibraryLinking(b, exe, libssh_include_dir, libssh_lib_dir);
-    
+
     // Ensure libssh is built before compiling the executable
     exe.step.dependOn(build_libssh_step);
 
@@ -161,18 +158,12 @@ pub fn build(b: *std.Build) void {
 
     // Custom build steps for development
     const clean_step = b.step("clean", "Clean build artifacts and libssh build");
-    const clean_cmd = b.addSystemCommand(&.{
-        "sh", "-c",
-        "rm -rf zig-out zig-cache deps/libssh/build"
-    });
+    const clean_cmd = b.addSystemCommand(&.{ "sh", "-c", "rm -rf zig-out zig-cache deps/libssh/build" });
     clean_step.dependOn(&clean_cmd.step);
 
     const setup_step = b.step("setup", "Initialize submodules and build dependencies");
-    const setup_cmd = b.addSystemCommand(&.{
-        "sh", "-c",
-        "git submodule update --init --recursive && " ++
-        "cd deps/libssh && git checkout libssh-0.11.2"
-    });
+    const setup_cmd = b.addSystemCommand(&.{ "sh", "-c", "git submodule update --init --recursive && " ++
+        "cd deps/libssh && git checkout libssh-0.11.2" });
     setup_step.dependOn(&setup_cmd.step);
     setup_step.dependOn(build_libssh_step);
 }
@@ -180,15 +171,15 @@ pub fn build(b: *std.Build) void {
 fn configureLibraryLinking(b: *std.Build, compile_step: *std.Build.Step.Compile, libssh_include_dir: []const u8, libssh_lib_dir: []const u8) void {
     // Link C standard library
     compile_step.linkLibC();
-    
+
     // Link SQLite3
     compile_step.linkSystemLibrary("sqlite3");
-    
+
     // Add libssh include path and library
     compile_step.addIncludePath(b.path(libssh_include_dir));
     compile_step.addLibraryPath(b.path(libssh_lib_dir));
     compile_step.linkSystemLibrary("ssh");
-    
+
     // For macOS, we might need additional system libraries
     if (compile_step.rootModuleTarget().os.tag == .macos) {
         compile_step.linkFramework("Security");

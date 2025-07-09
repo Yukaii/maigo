@@ -246,41 +246,41 @@ pub const SSHServer = struct {
     bind: *SSHBind,
     host: []const u8,
     port: u16,
-    
+
     pub fn init(allocator: std.mem.Allocator, host: []const u8, port: u16) !SSHServer {
         // Initialize libssh
         if (ssh_init() != SSH_OK) {
             return error.SSHInitFailed;
         }
-        
+
         // Set log level
         _ = ssh_set_log_level(SSH_LOG_PROTOCOL);
-        
+
         // Create SSH bind
         const bind = ssh_bind_new() orelse {
             return error.SSHBindCreateFailed;
         };
-        
+
         // Set bind options
         const port_str = try std.fmt.allocPrintZ(allocator, "{d}", .{port});
         defer allocator.free(port_str);
-        
+
         const host_cstr = try allocator.dupeZ(u8, host);
         defer allocator.free(host_cstr);
-        
+
         if (ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BINDADDR, host_cstr.ptr) != SSH_OK) {
             ssh_bind_free(bind);
             return error.SSHBindSetAddressFailed;
         }
-        
+
         if (ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BINDPORT_STR, port_str.ptr) != SSH_OK) {
             ssh_bind_free(bind);
             return error.SSHBindSetPortFailed;
         }
-        
+
         // Set up SSH host keys
         std.debug.print("Setting up SSH server with host keys\n", .{});
-        
+
         // Try to set RSA key
         const rsa_key_path = "tmp_keys/ssh_host_rsa_key";
         if (ssh_bind_options_set(bind, SSH_BIND_OPTIONS_RSAKEY, rsa_key_path) != SSH_OK) {
@@ -288,7 +288,7 @@ pub const SSHServer = struct {
         } else {
             std.debug.print("RSA key set successfully\n", .{});
         }
-        
+
         // Try to set ECDSA key
         const ecdsa_key_path = "tmp_keys/ssh_host_ecdsa_key";
         if (ssh_bind_options_set(bind, SSH_BIND_OPTIONS_ECDSAKEY, ecdsa_key_path) != SSH_OK) {
@@ -296,7 +296,7 @@ pub const SSHServer = struct {
         } else {
             std.debug.print("ECDSA key set successfully\n", .{});
         }
-        
+
         return SSHServer{
             .allocator = allocator,
             .bind = bind,
@@ -304,37 +304,37 @@ pub const SSHServer = struct {
             .port = port,
         };
     }
-    
+
     pub fn deinit(self: *SSHServer) void {
         ssh_bind_free(self.bind);
         _ = ssh_finalize();
     }
-    
+
     pub fn listen(self: *SSHServer) !void {
         std.debug.print("Starting SSH bind listen...\n", .{});
         const result = ssh_bind_listen(self.bind);
         if (result != SSH_OK) {
             std.debug.print("SSH bind listen failed with code: {}\n", .{result});
-            
+
             // Try to get more specific error information
             const error_msg = ssh_get_error_bind(self.bind);
             std.debug.print("SSH bind error: {s}\n", .{error_msg});
-            
+
             return error.SSHBindListenFailed;
         }
         std.debug.print("SSH bind listen successful\n", .{});
     }
-    
+
     pub fn accept(self: *SSHServer) !SSHConnection {
         const session = ssh_new() orelse {
             return error.SSHSessionCreateFailed;
         };
-        
+
         if (ssh_bind_accept(self.bind, session) != SSH_OK) {
             ssh_free(session);
             return error.SSHBindAcceptFailed;
         }
-        
+
         return SSHConnection{
             .allocator = self.allocator,
             .session = session,
@@ -345,11 +345,11 @@ pub const SSHServer = struct {
 pub const SSHConnection = struct {
     allocator: std.mem.Allocator,
     session: *SSHSession,
-    
+
     pub fn deinit(self: *SSHConnection) void {
         ssh_free(self.session);
     }
-    
+
     pub fn handleKeyExchange(self: *SSHConnection) !void {
         if (ssh_handle_key_exchange(self.session) != SSH_OK) {
             const error_msg = ssh_get_error(self.session);
@@ -357,12 +357,12 @@ pub const SSHConnection = struct {
             return error.SSHKeyExchangeFailed;
         }
     }
-    
-    pub fn processMessages(self: *SSHConnection, message_handler: *const fn(*SSHMessage) void) !void {
+
+    pub fn processMessages(self: *SSHConnection, message_handler: *const fn (*SSHMessage) void) !void {
         while (true) {
             const msg = ssh_message_get(self.session) orelse break;
             defer ssh_message_free(msg);
-            
+
             message_handler(msg);
         }
     }
@@ -372,14 +372,14 @@ pub const SSHConnection = struct {
 pub fn handleAuthMessage(msg: *SSHMessage) bool {
     const msg_type = ssh_message_type(msg);
     const msg_subtype = ssh_message_subtype(msg);
-    
+
     if (msg_type == SSH_REQUEST_AUTH) {
         if (msg_subtype == SSH_AUTH_METHOD_PASSWORD) {
             const user = ssh_message_auth_user(msg);
             const password = ssh_message_auth_password(msg);
-            
+
             std.debug.print("Authentication attempt: user={s}, password={s}\n", .{ user, password });
-            
+
             // For demo purposes, accept any user/password
             // In production, implement proper authentication
             if (ssh_message_auth_reply_success(msg, 0) == SSH_OK) {
@@ -387,18 +387,18 @@ pub fn handleAuthMessage(msg: *SSHMessage) bool {
                 return true;
             }
         }
-        
+
         // Reject authentication
         _ = ssh_message_auth_reply_default(msg);
     }
-    
+
     return false;
 }
 
 pub fn handleChannelMessage(msg: *SSHMessage) ?*SSHChannel {
     const msg_type = ssh_message_type(msg);
     const msg_subtype = ssh_message_subtype(msg);
-    
+
     if (msg_type == SSH_REQUEST_CHANNEL_OPEN) {
         if (msg_subtype == SSH_CHANNEL_SESSION) {
             std.debug.print("Channel open request received\n", .{});
@@ -411,6 +411,6 @@ pub fn handleChannelMessage(msg: *SSHMessage) ?*SSHChannel {
             return null; // Channel already established
         }
     }
-    
+
     return null;
 }
