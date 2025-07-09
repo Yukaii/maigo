@@ -637,3 +637,64 @@ test "oauth refresh token flow" {
     var validated = new_token_validation.?;
     defer validated.deinit(allocator);
 }
+
+test "oauth token expiration" {
+    const allocator = testing.allocator;
+    
+    var db = try database.Database.init(allocator, ":memory:");
+    defer db.deinit();
+    
+    var oauth_server = OAuthServer.init(allocator, &db);
+    
+    // Create a test client
+    var client = try oauth_server.createClient("Test App", "http://localhost:3000/callback");
+    defer client.deinit(allocator);
+    
+    try db.insertOAuthClient(client.id, client.secret, client.name, client.redirect_uri);
+    
+    // Create a test user
+    const user_id = try db.insertUser("testuser", "test@example.com");
+    
+    // Create an access token with past expiration
+    const expired_token = try oauth_server.generateRandomString(64);
+    defer allocator.free(expired_token);
+    
+    const past_timestamp = std.time.timestamp() - 3600; // 1 hour ago
+    
+    try db.insertAccessToken(
+        expired_token,
+        client.id,
+        user_id,
+        "url:read url:write",
+        past_timestamp,
+        null
+    );
+    
+    // Test validation of expired token
+    const validation_result = oauth_server.validateToken(expired_token);
+    try testing.expectError(OAuthError.TokenExpired, validation_result);
+    
+    // Create a valid token for comparison
+    const valid_token = try oauth_server.generateRandomString(64);
+    defer allocator.free(valid_token);
+    
+    const future_timestamp = std.time.timestamp() + 3600; // 1 hour from now
+    
+    try db.insertAccessToken(
+        valid_token,
+        client.id,
+        user_id,
+        "url:read url:write",
+        future_timestamp,
+        null
+    );
+    
+    // Test validation of valid token
+    const valid_result = try oauth_server.validateToken(valid_token);
+    try testing.expect(valid_result != null);
+    
+    var valid_access_token = valid_result.?;
+    defer valid_access_token.deinit(allocator);
+    
+    try testing.expect(valid_access_token.user_id == user_id);
+}
