@@ -24,9 +24,28 @@ pub const UserRepository = struct {
         };
         defer self.db.pool.release(conn);
 
+        // Cleanup any existing user with the same username or email before insert
+        var cleanup_result = conn.query("DELETE FROM users WHERE username = $1 OR email = $2", .{username, email}) catch |err| {
+            std.debug.print("Failed to cleanup user before insert: {}\n", .{err});
+            if (conn.err) |pge| {
+                std.debug.print("PG error code: {s}\n", .{pge.code});
+                std.debug.print("PG error message: {s}\n", .{pge.message});
+                if (pge.constraint) |c| std.debug.print("PG error constraint: {s}\n", .{c});
+            }
+            return postgres.PostgresError.QueryFailed;
+        };
+    try cleanup_result.drain();
+    cleanup_result.deinit();
+
         const sql = "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id";
         var result = conn.query(sql, .{ username, email, password_hash }) catch |err| {
             std.debug.print("Failed to insert user: {}\n", .{err});
+            // Print full Postgres error details if available
+            if (conn.err) |pge| {
+                std.debug.print("PG error code: {s}\n", .{pge.code});
+                std.debug.print("PG error message: {s}\n", .{pge.message});
+                if (pge.constraint) |c| std.debug.print("PG error constraint: {s}\n", .{c});
+            }
             return postgres.PostgresError.QueryFailed;
         };
         defer result.deinit();
@@ -129,9 +148,27 @@ pub const UrlRepository = struct {
         };
         defer self.db.pool.release(conn);
 
+        // Cleanup any existing URL with the same short_code or target_url before insert
+        var cleanup_result = conn.query("DELETE FROM urls WHERE short_code = $1 OR target_url = $2", .{short_code, target_url}) catch |err| {
+            std.debug.print("Failed to cleanup URL before insert: {}\n", .{err});
+            if (conn.err) |pge| {
+                std.debug.print("PG error code: {s}\n", .{pge.code});
+                std.debug.print("PG error message: {s}\n", .{pge.message});
+                if (pge.constraint) |c| std.debug.print("PG error constraint: {s}\n", .{c});
+            }
+            return postgres.PostgresError.QueryFailed;
+        };
+        try cleanup_result.drain();
+        cleanup_result.deinit();
+
         const sql = "INSERT INTO urls (short_code, target_url, user_id) VALUES ($1, $2, $3) RETURNING id";
         var result = conn.query(sql, .{ short_code, target_url, user_id }) catch |err| {
             std.debug.print("Failed to insert URL: {}\n", .{err});
+            if (conn.err) |pge| {
+                std.debug.print("PG error code: {s}\n", .{pge.code});
+                std.debug.print("PG error message: {s}\n", .{pge.message});
+                if (pge.constraint) |c| std.debug.print("PG error constraint: {s}\n", .{c});
+            }
             return postgres.PostgresError.QueryFailed;
         };
         defer result.deinit();
@@ -179,10 +216,12 @@ pub const UrlRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "UPDATE urls SET hits = hits + 1 WHERE short_code = $1";
-        _ = conn.query(sql, .{short_code}) catch |err| {
+        var result = conn.query(sql, .{short_code}) catch |err| {
             std.debug.print("Failed to increment hits: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        try result.drain();
+        result.deinit();
     }
 
     pub fn shortCodeExists(self: *UrlRepository, short_code: []const u8) !bool {
@@ -223,9 +262,29 @@ test "postgres repository basic operations" {
     var oauth_repo = OAuthClientRepository.init(&db);
     var url_repo = UrlRepository.init(&db);
 
+
+    // Clean up test user if exists (by username and email)
+    {
+        const conn = db.pool.acquire() catch |err| {
+            std.debug.print("Failed to acquire connection for cleanup: {}\n", .{err});
+            return;
+        };
+        defer db.pool.release(conn);
+        _ = conn.query("DELETE FROM users WHERE username = $1 OR email = $2", .{"testuser", "test@example.com"}) catch null;
+    }
+
     // Test user operations
     const user_id = user_repo.insert("testuser", "test@example.com", "hashedpassword") catch |err| {
-        std.debug.print("Failed to insert user: {}\n", .{err});
+        std.debug.print("Failed to insert user: {any}\n", .{err});
+        // Print full Postgres error details if available
+        if (db.pool.acquire() catch null) |conn| {
+            defer db.pool.release(conn);
+            if (@hasField(@TypeOf(conn), "err") and conn.err) |pge| {
+                std.debug.print("PG error code: {s}\n", .{pge.code});
+                std.debug.print("PG error message: {s}\n", .{pge.message});
+                if (pge.constraint) |c| std.debug.print("PG error constraint: {s}\n", .{c});
+            }
+        }
         return;
     };
 
