@@ -1,0 +1,11 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "Build cli_auth executable",
+			"command": "zig build cli_auth",
+			"group": "build"
+		}
+	]
+}

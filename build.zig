@@ -166,6 +166,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 
+
     // PostgreSQL integration test
     const postgres_test = b.addExecutable(.{
         .name = "test_postgres_integration",
@@ -173,31 +174,46 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    
     // Configure PostgreSQL test linking
     configureLibraryLinking(b, postgres_test, libssh_include_dir, libssh_lib_dir);
     postgres_test.root_module.addImport("pg", pg_dep.module("pg"));
     postgres_test.step.dependOn(build_libssh_step);
-    
     const postgres_test_run = b.addRunArtifact(postgres_test);
     const postgres_test_step = b.step("test-postgres", "Run PostgreSQL integration test");
     postgres_test_step.dependOn(&postgres_test_run.step);
 
-    // PostgreSQL debug test  
+    // PostgreSQL debug test
     const postgres_debug = b.addExecutable(.{
         .name = "debug_postgres",
         .root_source_file = b.path("debug_postgres.zig"),
         .target = target,
         .optimize = optimize,
     });
-    
     configureLibraryLinking(b, postgres_debug, libssh_include_dir, libssh_lib_dir);
     postgres_debug.root_module.addImport("pg", pg_dep.module("pg"));
     postgres_debug.step.dependOn(build_libssh_step);
-    
     const postgres_debug_run = b.addRunArtifact(postgres_debug);
     const postgres_debug_step = b.step("debug-postgres", "Run PostgreSQL debug test");
     postgres_debug_step.dependOn(&postgres_debug_run.step);
+
+    // === CLI Auth Tool ===
+    const cli_auth = b.addExecutable(.{
+        .name = "cli_auth",
+        .root_source_file = b.path("src/cli_auth.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    configureLibraryLinking(b, cli_auth, libssh_include_dir, libssh_lib_dir);
+    cli_auth.step.dependOn(build_libssh_step);
+    b.installArtifact(cli_auth);
+
+    const cli_auth_run = b.addRunArtifact(cli_auth);
+    const cli_auth_step = b.step("cli-auth", "Run the CLI OAuth tool");
+    cli_auth_step.dependOn(&cli_auth_run.step);
+
+    // Alias step for convenience: allow 'zig build cli_auth' as well
+    const cli_auth_alias = b.step("cli_auth", "Alias for cli-auth");
+    cli_auth_alias.dependOn(cli_auth_step);
 
     // Database setup commands
     const setup_db_cmd = b.addSystemCommand(&.{ "sh", "scripts/setup_postgres.sh", "test" });
