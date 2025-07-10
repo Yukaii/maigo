@@ -28,6 +28,7 @@ pub const TUI = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator, db: *database.Database, channel: *libssh.SSHChannel) !TUI {
+        std.debug.print("SSH TUI: Initializing with database pointer: {*}\n", .{db});
         return TUI{
             .allocator = allocator,
             .db = db,
@@ -53,11 +54,11 @@ pub const TUI = struct {
         try self.sendToSSH("\x1b[?1049h\x1b[H\x1b[2J\x1b[?25l");
 
         while (!self.should_quit) {
-            // Handle input from SSH channel
-            try self.handleSSHInput();
-
             // Render current screen
             try self.render();
+
+            // Handle input from SSH channel
+            try self.handleSSHInput();
 
             // Small delay to prevent busy waiting
             std.time.sleep(50 * std.time.ns_per_ms);
@@ -102,7 +103,10 @@ pub const TUI = struct {
             .main_menu => {},
             .registration => try self.processRegistration(),
             .login => try self.processLogin(),
-            .success => self.current_screen = .main_menu,
+            .success => {
+                self.current_screen = .main_menu;
+                self.status_message = null;
+            },
         }
     }
 
@@ -163,9 +167,16 @@ pub const TUI = struct {
         defer self.allocator.free(password_hash);
 
         // Try to register user
+        std.debug.print("SSH TUI: Attempting to register user '{s}'\n", .{username});
         const user_id = self.db.insertUser(username, email, password_hash) catch |err| {
+            std.debug.print("SSH TUI: Database error during registration: {}\n", .{err});
             if (err == database.DatabaseError.StepFailed) {
                 self.status_message = "Username already exists";
+                self.status_type = .err;
+                return;
+            }
+            if (err == database.DatabaseError.PrepareFailed) {
+                self.status_message = "Database connection error";
                 self.status_type = .err;
                 return;
             }
@@ -175,6 +186,7 @@ pub const TUI = struct {
         self.status_message = try std.fmt.allocPrint(self.allocator, "Registration successful! User ID: {d}", .{user_id});
         self.status_type = .success;
         self.current_screen = .success;
+        self.clearBuffers();
     }
 
     fn processLogin(self: *TUI) !void {
@@ -208,7 +220,7 @@ pub const TUI = struct {
     }
 
     fn render(self: *TUI) !void {
-        // Clear screen and position cursor at top
+        // Clear screen and position cursor at top immediately
         try self.sendToSSH("\x1b[H\x1b[2J");
 
         // Build the complete screen in a buffer

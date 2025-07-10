@@ -199,8 +199,8 @@ pub const LibSSHServer = struct {
             }
 
             if (shell_requested) {
-                // Start enhanced VaxisTUI session
-                try startVaxisTuiSession(&handler, ch);
+                // Start enhanced SSH TUI session
+                try startEnhancedTuiSession(&handler, ch);
             }
         }
     }
@@ -310,22 +310,20 @@ fn authenticateUser(handler: *ConnectionHandler, user: [*:0]const u8, password: 
     return true;
 }
 
-fn startVaxisTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
-    std.debug.print("Starting SSH TUI session\n", .{});
+fn startEnhancedTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
+    std.debug.print("Starting enhanced SSH TUI session\n", .{});
 
     // Initialize the enhanced TUI
     var tui = SSHTUI.init(handler.allocator, handler.db, channel) catch |err| {
         std.debug.print("Failed to initialize SSH TUI: {}\n", .{err});
-        // Fall back to basic TUI
-        return startTuiSession(handler, channel);
+        return err;
     };
     defer tui.deinit();
 
     // Run the enhanced TUI
     tui.run() catch |err| {
         std.debug.print("SSH TUI error: {}\n", .{err});
-        // Fall back to basic TUI
-        return startTuiSession(handler, channel);
+        return err;
     };
 }
 

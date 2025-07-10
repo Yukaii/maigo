@@ -161,11 +161,11 @@ pub const Database = struct {
         const create_access_tokens_table =
             \\CREATE TABLE IF NOT EXISTS access_tokens (
             \\    token TEXT PRIMARY KEY,
+            \\    refresh_token TEXT,
             \\    client_id TEXT NOT NULL,
             \\    user_id INTEGER NOT NULL,
             \\    scope TEXT NOT NULL,
             \\    expires_at INTEGER NOT NULL,
-            \\    refresh_token TEXT,
             \\    created_at INTEGER NOT NULL,
             \\    FOREIGN KEY (client_id) REFERENCES oauth_clients (id),
             \\    FOREIGN KEY (user_id) REFERENCES users (id)
@@ -561,7 +561,7 @@ pub const Database = struct {
 
     // Access Token operations
     pub fn insertAccessToken(self: *Database, token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8) !void {
-        const sql = "INSERT INTO access_tokens (token, client_id, user_id, scope, expires_at, refresh_token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        const sql = "INSERT INTO access_tokens (token, refresh_token, client_id, user_id, scope, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
 
@@ -584,19 +584,19 @@ pub const Database = struct {
         const now = std.time.timestamp();
 
         _ = c.sqlite3_bind_text(stmt, 1, token_cstr, -1, null);
-        _ = c.sqlite3_bind_text(stmt, 2, client_id_cstr, -1, null);
-        _ = c.sqlite3_bind_int64(stmt, 3, @intCast(user_id));
-        _ = c.sqlite3_bind_text(stmt, 4, scope_cstr, -1, null);
-        _ = c.sqlite3_bind_int64(stmt, 5, expires_at);
-
+        
         if (refresh_token) |rt| {
             const refresh_token_cstr = try self.allocator.dupeZ(u8, rt);
             defer self.allocator.free(refresh_token_cstr);
-            _ = c.sqlite3_bind_text(stmt, 6, refresh_token_cstr, -1, null);
+            _ = c.sqlite3_bind_text(stmt, 2, refresh_token_cstr, -1, null);
         } else {
-            _ = c.sqlite3_bind_null(stmt, 6);
+            _ = c.sqlite3_bind_null(stmt, 2);
         }
-
+        
+        _ = c.sqlite3_bind_text(stmt, 3, client_id_cstr, -1, null);
+        _ = c.sqlite3_bind_int64(stmt, 4, @intCast(user_id));
+        _ = c.sqlite3_bind_text(stmt, 5, scope_cstr, -1, null);
+        _ = c.sqlite3_bind_int64(stmt, 6, expires_at);
         _ = c.sqlite3_bind_int64(stmt, 7, now);
 
         result = c.sqlite3_step(stmt);
@@ -606,7 +606,7 @@ pub const Database = struct {
     }
 
     pub fn getAccessToken(self: *Database, token: []const u8) !?struct { token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8 } {
-        const sql = "SELECT token, client_id, user_id, scope, expires_at, refresh_token FROM access_tokens WHERE token = ?";
+        const sql = "SELECT token, refresh_token, client_id, user_id, scope, expires_at FROM access_tokens WHERE token = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
 
@@ -624,22 +624,34 @@ pub const Database = struct {
 
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
-            const access_token = std.mem.span(c.sqlite3_column_text(stmt, 0));
-            const client_id = std.mem.span(c.sqlite3_column_text(stmt, 1));
-            const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 2)));
-            const scope = std.mem.span(c.sqlite3_column_text(stmt, 3));
-            const expires_at = c.sqlite3_column_int64(stmt, 4);
-
-            const refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL)
-                null
-            else
-                try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 5)));
+            // Extract data column by column, copying immediately to avoid invalidation
+            const access_token = try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 0)));
+            
+            const refresh_token: ?[]u8 = blk: {
+                const col_type = c.sqlite3_column_type(stmt, 1);
+                if (col_type == c.SQLITE_NULL) {
+                    break :blk null;
+                } else {
+                    const refresh_token_ptr = c.sqlite3_column_text(stmt, 1);
+                    const refresh_token_span = std.mem.span(refresh_token_ptr);
+                    break :blk try self.allocator.dupe(u8, refresh_token_span);
+                }
+            };
+            
+            const client_id = try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 2)));
+            
+            // Get integer value before next text column
+            const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 3)));
+            
+            const scope = try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 4)));
+            
+            const expires_at = c.sqlite3_column_int64(stmt, 5);
 
             return .{
-                .token = try self.allocator.dupe(u8, access_token),
-                .client_id = try self.allocator.dupe(u8, client_id),
+                .token = access_token,
+                .client_id = client_id,
                 .user_id = user_id,
-                .scope = try self.allocator.dupe(u8, scope),
+                .scope = scope,
                 .expires_at = expires_at,
                 .refresh_token = refresh_token,
             };
@@ -651,7 +663,7 @@ pub const Database = struct {
     }
 
     pub fn getAccessTokenByRefresh(self: *Database, refresh_token: []const u8) !?struct { token: []const u8, client_id: []const u8, user_id: u64, scope: []const u8, expires_at: i64, refresh_token: ?[]const u8 } {
-        const sql = "SELECT token, client_id, user_id, scope, expires_at, refresh_token FROM access_tokens WHERE refresh_token = ?";
+        const sql = "SELECT token, refresh_token, client_id, user_id, scope, expires_at FROM access_tokens WHERE refresh_token = ?";
         const sql_cstr = try self.allocator.dupeZ(u8, sql);
         defer self.allocator.free(sql_cstr);
 
@@ -669,22 +681,32 @@ pub const Database = struct {
 
         result = c.sqlite3_step(stmt);
         if (result == c.SQLITE_ROW) {
-            const access_token = std.mem.span(c.sqlite3_column_text(stmt, 0));
-            const client_id = std.mem.span(c.sqlite3_column_text(stmt, 1));
-            const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 2)));
-            const scope = std.mem.span(c.sqlite3_column_text(stmt, 3));
-            const expires_at = c.sqlite3_column_int64(stmt, 4);
-
-            const stored_refresh_token: ?[]const u8 = if (c.sqlite3_column_type(stmt, 5) == c.SQLITE_NULL)
+            // Extract ALL text columns FIRST to avoid pointer invalidation
+            const access_token_span = std.mem.span(c.sqlite3_column_text(stmt, 0));
+            const access_token = try self.allocator.dupe(u8, access_token_span);
+            
+            const stored_refresh_token: ?[]u8 = if (c.sqlite3_column_type(stmt, 1) == c.SQLITE_NULL)
                 null
-            else
-                try self.allocator.dupe(u8, std.mem.span(c.sqlite3_column_text(stmt, 5)));
+            else blk: {
+                const refresh_token_span = std.mem.span(c.sqlite3_column_text(stmt, 1));
+                break :blk try self.allocator.dupe(u8, refresh_token_span);
+            };
+            
+            const client_id_span = std.mem.span(c.sqlite3_column_text(stmt, 2));
+            const client_id = try self.allocator.dupe(u8, client_id_span);
+            
+            const scope_span = std.mem.span(c.sqlite3_column_text(stmt, 4));
+            const scope = try self.allocator.dupe(u8, scope_span);
+            
+            // Now safe to call integer functions
+            const user_id = @as(u64, @intCast(c.sqlite3_column_int64(stmt, 3)));
+            const expires_at = c.sqlite3_column_int64(stmt, 5);
 
             return .{
-                .token = try self.allocator.dupe(u8, access_token),
-                .client_id = try self.allocator.dupe(u8, client_id),
+                .token = access_token,
+                .client_id = client_id,
                 .user_id = user_id,
-                .scope = try self.allocator.dupe(u8, scope),
+                .scope = scope,
                 .expires_at = expires_at,
                 .refresh_token = stored_refresh_token,
             };
@@ -726,6 +748,9 @@ pub const Database = struct {
         var stmt: ?*c.sqlite3_stmt = null;
         var result = c.sqlite3_prepare_v2(self.db, sql_cstr, -1, &stmt, null);
         if (result != c.SQLITE_OK) {
+            std.debug.print("SQLite prepare failed in insertUser: {s}\n", .{c.sqlite3_errmsg(self.db)});
+            std.debug.print("SQL: {s}\n", .{sql_cstr});
+            std.debug.print("Database pointer: {*}\n", .{self.db});
             return DatabaseError.PrepareFailed;
         }
         defer _ = c.sqlite3_finalize(stmt);
@@ -831,4 +856,370 @@ test "database basic operations" {
     // Test short code existence check
     try testing.expect(try db.shortCodeExists("test123"));
     try testing.expect(!try db.shortCodeExists("nonexistent"));
+}
+
+test "database user operations" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Test inserting a user
+    const user_id = try db.insertUser("testuser", "test@example.com", "hashedpassword123");
+    try testing.expect(user_id > 0);
+
+    // Test retrieving the user
+    var user = try db.getUserByUsername("testuser");
+    try testing.expect(user != null);
+
+    if (user) |*u| {
+        defer u.deinit(allocator);
+        try testing.expectEqualStrings("testuser", u.username);
+        try testing.expectEqualStrings("test@example.com", u.email);
+        try testing.expectEqualStrings("hashedpassword123", u.password_hash);
+        try testing.expect(u.id == user_id);
+        try testing.expect(u.created_at > 0);
+    }
+
+    // Test retrieving non-existent user
+    const nonexistent_user = try db.getUserByUsername("nonexistent");
+    try testing.expect(nonexistent_user == null);
+
+    // Test duplicate username should fail
+    const duplicate_result = db.insertUser("testuser", "other@example.com", "otherpassword");
+    try testing.expectError(DatabaseError.StepFailed, duplicate_result);
+
+    // Test duplicate email should fail
+    const duplicate_email_result = db.insertUser("otheruser", "test@example.com", "otherpassword");
+    try testing.expectError(DatabaseError.StepFailed, duplicate_email_result);
+}
+
+test "database oauth client operations" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Test CLI client fixture is automatically inserted
+    const cli_client = try db.getOAuthClient("maigo-cli");
+    try testing.expect(cli_client != null);
+
+    if (cli_client) |client| {
+        try testing.expectEqualStrings("maigo-cli", client.id);
+        try testing.expectEqualStrings("cli-secret-fixed-deterministic-value-for-embedded-client", client.secret);
+        try testing.expectEqualStrings("Maigo CLI", client.name);
+        try testing.expectEqualStrings("urn:ietf:wg:oauth:2.0:oob", client.redirect_uri);
+        
+        allocator.free(client.id);
+        allocator.free(client.secret);
+        allocator.free(client.name);
+        allocator.free(client.redirect_uri);
+    }
+
+    // Test inserting a custom OAuth client
+    try db.insertOAuthClient("test-client", "test-secret", "Test Client", "http://localhost:3000/callback");
+
+    const custom_client = try db.getOAuthClient("test-client");
+    try testing.expect(custom_client != null);
+
+    if (custom_client) |client| {
+        try testing.expectEqualStrings("test-client", client.id);
+        try testing.expectEqualStrings("test-secret", client.secret);
+        try testing.expectEqualStrings("Test Client", client.name);
+        try testing.expectEqualStrings("http://localhost:3000/callback", client.redirect_uri);
+        
+        allocator.free(client.id);
+        allocator.free(client.secret);
+        allocator.free(client.name);
+        allocator.free(client.redirect_uri);
+    }
+
+    // Test retrieving non-existent client
+    const nonexistent_client = try db.getOAuthClient("nonexistent");
+    try testing.expect(nonexistent_client == null);
+}
+
+test "database authorization code operations" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Create test user and client first
+    const user_id = try db.insertUser("testuser", "test@example.com", "hashedpassword");
+    try db.insertOAuthClient("test-client", "test-secret", "Test Client", "http://localhost:3000/callback");
+
+    // Test inserting authorization code
+    const now = std.time.timestamp();
+    const expires_at = now + 600; // 10 minutes
+    try db.insertAuthorizationCode("auth-code-123", "test-client", user_id, "http://localhost:3000/callback", expires_at);
+
+    // Test retrieving authorization code
+    const auth_code = try db.getAuthorizationCode("auth-code-123");
+    try testing.expect(auth_code != null);
+
+    if (auth_code) |code| {
+        try testing.expectEqualStrings("auth-code-123", code.code);
+        try testing.expectEqualStrings("test-client", code.client_id);
+        try testing.expect(code.user_id == user_id);
+        try testing.expectEqualStrings("http://localhost:3000/callback", code.redirect_uri);
+        try testing.expect(code.expires_at == expires_at);
+        try testing.expect(!code.used);
+
+        allocator.free(code.code);
+        allocator.free(code.client_id);
+        allocator.free(code.redirect_uri);
+    }
+
+    // Test marking authorization code as used
+    try db.markAuthorizationCodeUsed("auth-code-123");
+
+    const used_code = try db.getAuthorizationCode("auth-code-123");
+    try testing.expect(used_code != null);
+
+    if (used_code) |code| {
+        try testing.expect(code.used);
+        
+        allocator.free(code.code);
+        allocator.free(code.client_id);
+        allocator.free(code.redirect_uri);
+    }
+
+    // Test retrieving non-existent authorization code
+    const nonexistent_code = try db.getAuthorizationCode("nonexistent");
+    try testing.expect(nonexistent_code == null);
+}
+
+test "database access token operations" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Create test user and client first
+    const user_id = try db.insertUser("testuser", "test@example.com", "hashedpassword");
+    try db.insertOAuthClient("test-client", "test-secret", "Test Client", "http://localhost:3000/callback");
+
+    // Test inserting access token with refresh token
+    const now = std.time.timestamp();
+    const expires_at = now + 3600; // 1 hour
+    try db.insertAccessToken("access-token-123", "test-client", user_id, "url:read url:write", expires_at, "refresh-token-123");
+
+    // Test retrieving access token
+    const access_token = try db.getAccessToken("access-token-123");
+    try testing.expect(access_token != null);
+
+    if (access_token) |token| {
+        defer {
+            allocator.free(token.token);
+            allocator.free(token.client_id);
+            allocator.free(token.scope);
+            if (token.refresh_token) |rt| {
+                allocator.free(rt);
+            }
+        }
+        
+        try testing.expectEqualStrings("access-token-123", token.token);
+        try testing.expectEqualStrings("test-client", token.client_id);
+        try testing.expect(token.user_id == user_id);
+        try testing.expectEqualStrings("url:read url:write", token.scope);
+        try testing.expect(token.expires_at == expires_at);
+        try testing.expect(token.refresh_token != null);
+        if (token.refresh_token) |rt| {
+            try testing.expectEqualStrings("refresh-token-123", rt);
+        }
+    }
+
+    // Test retrieving access token by refresh token
+    const token_by_refresh = try db.getAccessTokenByRefresh("refresh-token-123");
+    try testing.expect(token_by_refresh != null);
+
+    if (token_by_refresh) |token| {
+        defer {
+            allocator.free(token.token);
+            allocator.free(token.client_id);
+            allocator.free(token.scope);
+            if (token.refresh_token) |rt| {
+                allocator.free(rt);
+            }
+        }
+        
+        try testing.expectEqualStrings("access-token-123", token.token);
+    }
+
+    // Test inserting access token without refresh token
+    try db.insertAccessToken("access-token-456", "test-client", user_id, "url:read", expires_at, null);
+
+    const no_refresh_token = try db.getAccessToken("access-token-456");
+    try testing.expect(no_refresh_token != null);
+
+    if (no_refresh_token) |token| {
+        defer {
+            allocator.free(token.token);
+            allocator.free(token.client_id);
+            allocator.free(token.scope);
+        }
+        
+        try testing.expect(token.refresh_token == null);
+    }
+
+    // Test revoking access token
+    try db.revokeAccessToken("access-token-123");
+
+    const revoked_token = try db.getAccessToken("access-token-123");
+    try testing.expect(revoked_token == null);
+
+    // Test retrieving non-existent tokens
+    const nonexistent_token = try db.getAccessToken("nonexistent");
+    try testing.expect(nonexistent_token == null);
+
+    const nonexistent_refresh = try db.getAccessTokenByRefresh("nonexistent");
+    try testing.expect(nonexistent_refresh == null);
+}
+
+test "database url operations with user association" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Create test user
+    const user_id = try db.insertUser("testuser", "test@example.com", "hashedpassword");
+
+    // Test inserting URL with user association
+    const url_id = try db.insertUrl("user123", "https://example.com/user", user_id);
+    try testing.expect(url_id > 0);
+
+    // Test retrieving the URL
+    var url = try db.getUrlByShortCode("user123");
+    try testing.expect(url != null);
+
+    if (url) |*u| {
+        defer u.deinit(allocator);
+        try testing.expectEqualStrings("user123", u.short_code);
+        try testing.expectEqualStrings("https://example.com/user", u.target_url);
+        try testing.expect(u.user_id == user_id);
+        try testing.expect(u.hits == 0);
+    }
+
+    // Test multiple hit increments
+    try db.incrementHits("user123");
+    try db.incrementHits("user123");
+    try db.incrementHits("user123");
+
+    var updated_url = try db.getUrlByShortCode("user123");
+    try testing.expect(updated_url != null);
+
+    if (updated_url) |*u| {
+        defer u.deinit(allocator);
+        try testing.expect(u.hits == 3);
+    }
+}
+
+test "database edge cases and error conditions" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Test inserting URL with duplicate short code
+    _ = try db.insertUrl("duplicate", "https://first.com", null);
+    const duplicate_result = db.insertUrl("duplicate", "https://second.com", null);
+    try testing.expectError(DatabaseError.StepFailed, duplicate_result);
+
+    // Test incrementing hits for non-existent URL (should not error)
+    try db.incrementHits("nonexistent");
+
+    // Test empty strings (should work as valid data)
+    const empty_user_id = try db.insertUser("emptyuser", "", "");
+    try testing.expect(empty_user_id > 0);
+
+    var empty_user = try db.getUserByUsername("emptyuser");
+    try testing.expect(empty_user != null);
+    if (empty_user) |*u| {
+        defer u.deinit(allocator);
+        try testing.expectEqualStrings("", u.email);
+        try testing.expectEqualStrings("", u.password_hash);
+    }
+}
+
+test "database simple refresh token test" {
+    const allocator = testing.allocator;
+
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    // Create test user and client first
+    const user_id = try db.insertUser("testuser", "test@example.com", "hashedpassword");
+    try db.insertOAuthClient("test-client", "test-secret", "Test Client", "http://localhost:3000/callback");
+
+    // Test simple refresh token insertion and retrieval
+    const now = std.time.timestamp();
+    const expires_at = now + 3600;
+    
+    // Insert WITHOUT refresh token first to see if that works
+    try db.insertAccessToken("token-no-refresh", "test-client", user_id, "scope", expires_at, null);
+    
+    const token_no_refresh = try db.getAccessToken("token-no-refresh");
+    try testing.expect(token_no_refresh != null);
+    if (token_no_refresh) |token| {
+        defer {
+            allocator.free(token.token);
+            allocator.free(token.client_id);
+            allocator.free(token.scope);
+        }
+        
+        try testing.expect(token.refresh_token == null);
+    }
+
+    // Now test WITH a simple refresh token
+    try db.insertAccessToken("token-with-refresh", "test-client", user_id, "scope", expires_at, "simple");
+    
+    const token_with_refresh = try db.getAccessToken("token-with-refresh");
+    try testing.expect(token_with_refresh != null);
+    if (token_with_refresh) |token| {
+        defer {
+            allocator.free(token.token);
+            allocator.free(token.client_id);
+            allocator.free(token.scope);
+            if (token.refresh_token) |rt| {
+                allocator.free(rt);
+            }
+        }
+        
+        try testing.expect(token.refresh_token != null);
+        if (token.refresh_token) |rt| {
+            try testing.expectEqualStrings("simple", rt);
+        }
+    }
+}
+
+test "database cli client credentials" {
+    const allocator = testing.allocator;
+
+    // Test CLI client credentials fixture
+    const cli_creds = getCliClientCredentials();
+    try testing.expectEqualStrings("maigo-cli", cli_creds.client_id);
+    try testing.expectEqualStrings("cli-secret-fixed-deterministic-value-for-embedded-client", cli_creds.client_secret);
+    try testing.expectEqualStrings("Maigo CLI", cli_creds.name);
+    try testing.expectEqualStrings("urn:ietf:wg:oauth:2.0:oob", cli_creds.redirect_uri);
+
+    // Test that CLI client is automatically inserted during database initialization
+    var db = try Database.init(allocator, ":memory:");
+    defer db.deinit();
+
+    const inserted_cli_client = try db.getOAuthClient("maigo-cli");
+    try testing.expect(inserted_cli_client != null);
+
+    if (inserted_cli_client) |client| {
+        try testing.expectEqualStrings(cli_creds.client_id, client.id);
+        try testing.expectEqualStrings(cli_creds.client_secret, client.secret);
+        try testing.expectEqualStrings(cli_creds.name, client.name);
+        try testing.expectEqualStrings(cli_creds.redirect_uri, client.redirect_uri);
+
+        allocator.free(client.id);
+        allocator.free(client.secret);
+        allocator.free(client.name);
+        allocator.free(client.redirect_uri);
+    }
 }
