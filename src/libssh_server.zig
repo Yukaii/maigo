@@ -1,7 +1,7 @@
 const std = @import("std");
 const libssh = @import("libssh.zig");
 const database = @import("database.zig");
-const SSHTUI = @import("ssh_tui.zig").VaxisTUI;
+const SSHTUI = @import("ssh_tui.zig").TUI;
 
 pub const LibSSHServer = struct {
     allocator: std.mem.Allocator,
@@ -372,7 +372,7 @@ fn startTuiSession(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !vo
             \\│ 3. Exit                             │
             \\└─────────────────────────────────────┘
             \\
-            \\Enter choice (1-3): 
+            \\Enter choice (1-3):
         ;
 
         const menu_bytes_written = libssh.ssh_channel_write(channel, menu_msg);
@@ -431,7 +431,7 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
         \\│ Create a new Maigo account         │
         \\└─────────────────────────────────────┘
         \\
-        \\👤 Enter username: 
+        \\👤 Enter username:
     ;
 
     if (libssh.ssh_channel_write(channel, reg_header) < 0) {
@@ -473,7 +473,7 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
 
     // Get email
     const email_prompt =
-        \\📧 Enter email: 
+        \\📧 Enter email:
     ;
 
     if (libssh.ssh_channel_write(channel, email_prompt) < 0) {
@@ -499,7 +499,7 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
 
     // Get password
     const password_prompt =
-        \\🔒 Enter password (min 6 chars): 
+        \\🔒 Enter password (min 6 chars):
     ;
 
     if (libssh.ssh_channel_write(channel, password_prompt) < 0) {
@@ -571,7 +571,7 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
         \\│ Sign in to your Maigo account      │
         \\└─────────────────────────────────────┘
         \\
-        \\👤 Username: 
+        \\👤 Username:
     ;
 
     if (libssh.ssh_channel_write(channel, login_header) < 0) {
@@ -600,7 +600,7 @@ fn handleLogin(handler: *ConnectionHandler, channel: *libssh.SSHChannel) !void {
 
     // Get password
     const password_prompt =
-        \\🔒 Password: 
+        \\🔒 Password:
     ;
 
     if (libssh.ssh_channel_write(channel, password_prompt) < 0) {

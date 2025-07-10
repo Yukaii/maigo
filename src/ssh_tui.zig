@@ -2,7 +2,7 @@ const std = @import("std");
 const libssh = @import("libssh.zig");
 const database = @import("database.zig");
 
-pub const VaxisTUI = struct {
+pub const TUI = struct {
     allocator: std.mem.Allocator,
     db: *database.Database,
     channel: *libssh.SSHChannel,
@@ -27,8 +27,8 @@ pub const VaxisTUI = struct {
         err,
     };
 
-    pub fn init(allocator: std.mem.Allocator, db: *database.Database, channel: *libssh.SSHChannel) !VaxisTUI {
-        return VaxisTUI{
+    pub fn init(allocator: std.mem.Allocator, db: *database.Database, channel: *libssh.SSHChannel) !TUI {
+        return TUI{
             .allocator = allocator,
             .db = db,
             .channel = channel,
@@ -42,13 +42,13 @@ pub const VaxisTUI = struct {
         };
     }
 
-    pub fn deinit(self: *VaxisTUI) void {
+    pub fn deinit(self: *TUI) void {
         self.username_buffer.deinit();
         self.email_buffer.deinit();
         self.password_buffer.deinit();
     }
 
-    pub fn run(self: *VaxisTUI) !void {
+    pub fn run(self: *TUI) !void {
         // Send initial setup to client - enter alternate screen and hide cursor
         try self.sendToSSH("\x1b[?1049h\x1b[H\x1b[2J\x1b[?25l");
 
@@ -67,14 +67,14 @@ pub const VaxisTUI = struct {
         try self.sendToSSH("\x1b[?25h\x1b[?1049l");
     }
 
-    fn sendToSSH(self: *VaxisTUI, data: []const u8) !void {
+    fn sendToSSH(self: *TUI, data: []const u8) !void {
         const bytes_written = libssh.ssh_channel_write(self.channel, data);
         if (bytes_written < 0) {
             return error.SSHWriteFailed;
         }
     }
 
-    fn handleSSHInput(self: *VaxisTUI) !void {
+    fn handleSSHInput(self: *TUI) !void {
         var buffer: [256]u8 = undefined;
         const bytes_read = libssh.ssh_channel_read_timeout(self.channel, &buffer, 0, 10); // 10ms timeout
 
@@ -84,7 +84,7 @@ pub const VaxisTUI = struct {
         }
     }
 
-    fn processInput(self: *VaxisTUI, input: []const u8) !void {
+    fn processInput(self: *TUI, input: []const u8) !void {
         for (input) |byte| {
             switch (byte) {
                 '\r', '\n' => try self.handleEnter(),
@@ -97,7 +97,7 @@ pub const VaxisTUI = struct {
         }
     }
 
-    fn handleEnter(self: *VaxisTUI) !void {
+    fn handleEnter(self: *TUI) !void {
         switch (self.current_screen) {
             .main_menu => {},
             .registration => try self.processRegistration(),
@@ -106,7 +106,7 @@ pub const VaxisTUI = struct {
         }
     }
 
-    fn handleBackspace(self: *VaxisTUI) !void {
+    fn handleBackspace(self: *TUI) !void {
         switch (self.current_screen) {
             .registration, .login => {
                 // Remove last character from current input buffer
@@ -118,7 +118,7 @@ pub const VaxisTUI = struct {
         }
     }
 
-    fn handleMenuChoice(self: *VaxisTUI, choice: u8) !void {
+    fn handleMenuChoice(self: *TUI, choice: u8) !void {
         switch (choice) {
             '1' => {
                 self.current_screen = .registration;
@@ -137,7 +137,7 @@ pub const VaxisTUI = struct {
         }
     }
 
-    fn handlePrintableChar(self: *VaxisTUI, char: u8) !void {
+    fn handlePrintableChar(self: *TUI, char: u8) !void {
         switch (self.current_screen) {
             .registration, .login => {
                 try self.username_buffer.append(char);
@@ -146,7 +146,7 @@ pub const VaxisTUI = struct {
         }
     }
 
-    fn processRegistration(self: *VaxisTUI) !void {
+    fn processRegistration(self: *TUI) !void {
         const username = self.username_buffer.items;
         if (username.len < 3) {
             self.status_message = "Username must be at least 3 characters";
@@ -177,7 +177,7 @@ pub const VaxisTUI = struct {
         self.current_screen = .success;
     }
 
-    fn processLogin(self: *VaxisTUI) !void {
+    fn processLogin(self: *TUI) !void {
         const username = self.username_buffer.items;
         if (username.len == 0) {
             self.status_message = "Username cannot be empty";
@@ -200,14 +200,14 @@ pub const VaxisTUI = struct {
         self.current_screen = .success;
     }
 
-    fn clearBuffers(self: *VaxisTUI) void {
+    fn clearBuffers(self: *TUI) void {
         self.username_buffer.clearRetainingCapacity();
         self.email_buffer.clearRetainingCapacity();
         self.password_buffer.clearRetainingCapacity();
         self.status_message = null;
     }
 
-    fn render(self: *VaxisTUI) !void {
+    fn render(self: *TUI) !void {
         // Clear screen and position cursor at top
         try self.sendToSSH("\x1b[H\x1b[2J");
 
@@ -258,7 +258,7 @@ pub const VaxisTUI = struct {
         try self.sendToSSH(buffer.items);
     }
 
-    fn drawMainMenu(self: *VaxisTUI, buffer: *std.ArrayList(u8)) !void {
+    fn drawMainMenu(self: *TUI, buffer: *std.ArrayList(u8)) !void {
         _ = self;
         try buffer.appendSlice("  Choose an option:\r\n");
         try buffer.appendSlice("\r\n");
@@ -272,7 +272,7 @@ pub const VaxisTUI = struct {
         try buffer.appendSlice("\r\n");
     }
 
-    fn drawRegistration(self: *VaxisTUI, buffer: *std.ArrayList(u8)) !void {
+    fn drawRegistration(self: *TUI, buffer: *std.ArrayList(u8)) !void {
         try buffer.appendSlice("  Create a new account:\r\n\r\n");
         try buffer.appendSlice("  Username: ");
 
@@ -289,7 +289,7 @@ pub const VaxisTUI = struct {
         try buffer.appendSlice("  Press Ctrl+C to exit\r\n");
     }
 
-    fn drawLogin(self: *VaxisTUI, buffer: *std.ArrayList(u8)) !void {
+    fn drawLogin(self: *TUI, buffer: *std.ArrayList(u8)) !void {
         try buffer.appendSlice("  Sign in to your account:\r\n\r\n");
         try buffer.appendSlice("  Username: ");
 
@@ -305,13 +305,13 @@ pub const VaxisTUI = struct {
         try buffer.appendSlice("  Press Ctrl+C to exit\r\n");
     }
 
-    fn drawSuccess(self: *VaxisTUI, buffer: *std.ArrayList(u8)) !void {
+    fn drawSuccess(self: *TUI, buffer: *std.ArrayList(u8)) !void {
         _ = self;
         try buffer.appendSlice("  \x1b[32m✓ Operation completed successfully!\x1b[0m\r\n\r\n");
         try buffer.appendSlice("  Press Enter to return to main menu\r\n");
     }
 
-    fn hashPassword(self: *VaxisTUI, password: []const u8) ![]u8 {
+    fn hashPassword(self: *TUI, password: []const u8) ![]u8 {
         var hasher = std.crypto.hash.sha2.Sha256.init(.{});
         hasher.update("maigo_salt_");
         hasher.update(password);
