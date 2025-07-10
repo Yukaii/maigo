@@ -1,3 +1,28 @@
+const crypto = std.crypto;
+// Session management
+const SESSION_COOKIE_NAME = "maigo_session";
+const SESSION_DURATION_SECS: i64 = 3600 * 24 * 7; // 1 week
+
+fn generateSessionId(allocator: std.mem.Allocator) ![]u8 {
+    var buf: [32]u8 = undefined;
+    try crypto.random.bytes(&buf);
+    return std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(&buf)});
+}
+
+// In-memory session store for demo (replace with DB for production)
+var session_store = std.AutoHashMap([]const u8, u64).init(std.heap.page_allocator);
+
+fn setSession(session_id: []const u8, user_id: u64) void {
+    session_store.put(session_id, user_id) catch {};
+}
+
+fn getSession(session_id: []const u8) ?u64 {
+    return session_store.get(session_id);
+}
+
+fn clearSession(session_id: []const u8) void {
+    session_store.remove(session_id);
+}
 const std = @import("std");
 const net = std.net;
 const testing = std.testing;
@@ -105,12 +130,12 @@ pub const RouteHandler = struct {
             if (std.mem.startsWith(u8, request.path, "/api/urls")) {
                 try self.handleProtectedUrlsApi(writer, request);
             } else if (std.mem.startsWith(u8, request.path, "/oauth/authorize")) {
-                try self.handleOAuthAuthorize(writer, request.path);
+                try self.handleOAuthAuthorize(writer, request);
+            } else if (std.mem.startsWith(u8, request.path, "/login")) {
+                try self.handleLoginGet(writer, request);
             } else if (subdomain) |sub| {
-                // Subdomain request - redirect to full URL
                 try self.handleRedirect(writer, sub);
             } else {
-                // Main domain request
                 try self.handleMainDomain(writer, request.path);
             }
         } else if (std.mem.eql(u8, request.method, "POST")) {
@@ -120,12 +145,96 @@ pub const RouteHandler = struct {
                 try self.handleShorten(writer, request.body);
             } else if (std.mem.eql(u8, request.path, "/oauth/token")) {
                 try self.handleOAuthToken(writer, request.body);
+            } else if (std.mem.eql(u8, request.path, "/login")) {
+                try self.handleLoginPost(writer, request);
             } else {
                 try self.sendNotFound(writer);
             }
         } else {
             try self.sendMethodNotAllowed(writer);
         }
+    }
+
+    // Extract session_id from Cookie header
+    fn getSessionIdFromRequest(self: *RouteHandler, request: HttpRequest) ?[]const u8 {
+        // Look for "Cookie: maigo_session=..."
+        const cookie_header = self.getHeader(request, "Cookie");
+        if (cookie_header) |cookie| {
+            if (std.mem.indexOf(u8, cookie, SESSION_COOKIE_NAME ++ "=")) |idx| {
+                const start = idx + SESSION_COOKIE_NAME.len + 1;
+                const end = std.mem.indexOfPos(u8, cookie, start, ";") orelse cookie.len;
+                return cookie[start..end];
+            }
+        }
+        return null;
+    }
+
+    fn getHeader(unused_request: HttpRequest, unused_name: []const u8) ?[]const u8 {
+        // Only Cookie is supported for now
+        // Not implemented: always return null
+        _ = unused_request;
+        _ = unused_name;
+        return null;
+    }
+
+    fn handleLoginGet(self: *RouteHandler, writer: anytype, request: HttpRequest) !void {
+        // Show login form
+        const return_to = self.parseQueryValue(request.path, "return_to") orelse "/";
+        const html = try std.fmt.allocPrint(self.allocator,
+            "<!DOCTYPE html><html><head><title>Login</title></head><body><h1>Login</h1><form method='post' action='/login'><input type='hidden' name='return_to' value=\"{s}\"><label>Username: <input name='username'></label><br><label>Password: <input type='password' name='password'></label><br><button type='submit'>Login</button></form></body></html>",
+            return_to);
+        defer self.allocator.free(html);
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}",
+            html.len, html);
+        defer self.allocator.free(response);
+        try writer.writeAll(response);
+    }
+
+    fn handleLoginPost(self: *RouteHandler, writer: anytype, request: HttpRequest) !void {
+        // Parse form values
+        const username = self.parseFormValue(request.body, "username") orelse {
+            try self.sendBadRequest(writer, "Missing username");
+            return;
+        };
+        const password = self.parseFormValue(request.body, "password") orelse {
+            try self.sendBadRequest(writer, "Missing password");
+            return;
+        };
+        const return_to = self.parseFormValue(request.body, "return_to") orelse "/";
+
+        // Authenticate user
+        const user = self.db.getUserByUsername(username) catch |err| {
+            std.debug.print("DB error: {}\n", .{err});
+            try self.sendInternalError(writer);
+            return;
+        };
+        if (user == null) {
+            try self.sendBadRequest(writer, "Invalid username or password");
+            return;
+        }
+        var u = user.?;
+        defer u.deinit(self.allocator);
+        // Hash password and compare
+        const password_hash = try hashPassword(self.allocator, password);
+        defer self.allocator.free(password_hash);
+        if (!std.mem.eql(u8, u.password_hash, password_hash)) {
+            try self.sendBadRequest(writer, "Invalid username or password");
+            return;
+        }
+        // Create session
+        const session_id = try generateSessionId(self.allocator);
+        setSession(session_id, u.id);
+        // Set cookie and redirect
+        const set_cookie = try std.fmt.allocPrint(self.allocator,
+            "Set-Cookie: {s}={s}; HttpOnly; Path=/; Max-Age={d}",
+            .{ SESSION_COOKIE_NAME, session_id, SESSION_DURATION_SECS });
+        defer self.allocator.free(set_cookie);
+        const response = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 302 Found\r\n{s}\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n",
+            .{ set_cookie, return_to });
+        defer self.allocator.free(response);
+        try writer.writeAll(response);
     }
 
     fn handleProtectedUrlsApi(self: *RouteHandler, writer: anytype, request: HttpRequest) !void {
@@ -430,35 +539,44 @@ pub const RouteHandler = struct {
         try writer.writeAll(response);
     }
 
-    fn handleOAuthAuthorize(self: *RouteHandler, writer: anytype, path: []const u8) !void {
-        // Parse query parameters
-        const query_start = std.mem.indexOf(u8, path, "?") orelse {
+    // (removed old handleOAuthAuthorize with path argument)
+    fn handleOAuthAuthorize(self: *RouteHandler, writer: anytype, request: HttpRequest) !void {
+        // Parse query parameters from path
+        const query_start = std.mem.indexOf(u8, request.path, "?") orelse {
             try self.sendBadRequest(writer, "Missing query parameters");
             return;
         };
-
-        const query = path[query_start + 1 ..];
-
+        const query = request.path[query_start + 1 ..];
         const client_id = self.parseQueryValue(query, "client_id") orelse {
             try self.sendBadRequest(writer, "Missing client_id parameter");
             return;
         };
         defer self.allocator.free(client_id);
-
         const redirect_uri = self.parseQueryValue(query, "redirect_uri") orelse {
             try self.sendBadRequest(writer, "Missing redirect_uri parameter");
             return;
         };
         defer self.allocator.free(redirect_uri);
-
         const response_type = self.parseQueryValue(query, "response_type") orelse {
             try self.sendBadRequest(writer, "Missing response_type parameter");
             return;
         };
         defer self.allocator.free(response_type);
-
         const state = self.parseQueryValue(query, "state");
         defer if (state) |s| self.allocator.free(s);
+
+        // Check session
+        const session_id = self.getSessionIdFromRequest(request);
+        const user_id = if (session_id) |sid| getSession(sid) else null;
+        if (user_id == null) {
+            // Not logged in, redirect to login
+            const login_url = try std.fmt.allocPrint(self.allocator, "/login?return_to={s}", .{request.path});
+            defer self.allocator.free(login_url);
+            const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n", .{login_url});
+            defer self.allocator.free(response);
+            try writer.writeAll(response);
+            return;
+        }
 
         // Validate client exists
         const client = self.db.getOAuthClient(client_id) catch |err| {
@@ -466,12 +584,10 @@ pub const RouteHandler = struct {
             try self.sendInternalError(writer);
             return;
         };
-
         if (client == null) {
             try self.sendBadRequest(writer, "Invalid client_id");
             return;
         }
-
         const client_data = client.?;
         defer {
             self.allocator.free(client_data.id);
@@ -479,43 +595,92 @@ pub const RouteHandler = struct {
             self.allocator.free(client_data.name);
             self.allocator.free(client_data.redirect_uri);
         }
-
         // Validate redirect URI
         if (!std.mem.eql(u8, client_data.redirect_uri, redirect_uri)) {
             try self.sendBadRequest(writer, "Invalid redirect_uri");
             return;
         }
-
-        const html = try std.fmt.allocPrint(self.allocator,
-            \\<!DOCTYPE html>
-            \\<html>
-            \\<head><title>Authorize {s}</title></head>
-            \\<body>
-            \\<h1>Authorize {s}</h1>
-            \\<p>The application "{s}" wants to access your Maigo account.</p>
-            \\<form method="post" action="/oauth/authorize">
-            \\<input type="hidden" name="client_id" value="{s}">
-            \\<input type="hidden" name="redirect_uri" value="{s}">
-            \\<input type="hidden" name="response_type" value="{s}">
-            \\{s}
-            \\<button type="submit" name="approve" value="true">Approve</button>
-            \\<button type="submit" name="deny" value="true">Deny</button>
-            \\</form>
-            \\</body>
-            \\</html>
-        , .{ client_data.name, client_data.name, client_data.name, client_id, redirect_uri, response_type, if (state) |s| try std.fmt.allocPrint(self.allocator, "<input type=\"hidden\" name=\"state\" value=\"{s}\">", .{s}) else "" });
-        defer self.allocator.free(html);
-
-        if (state) |s| {
-            const state_input = try std.fmt.allocPrint(self.allocator, "<input type=\"hidden\" name=\"state\" value=\"{s}\">", .{s});
-            defer self.allocator.free(state_input);
+        // Detect OOB redirect URIs
+        const oob_uris = [_][]const u8{
+            "urn:ietf:wg:oauth:2.0:oob",
+            "urn:ietf:wg:oauth:2.0:oob:auto",
+            "oob",
+        };
+        var is_oob = false;
+        for (oob_uris) |oob_uri| {
+            if (std.mem.eql(u8, redirect_uri, oob_uri)) {
+                is_oob = true;
+                break;
+            }
         }
-
-        const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}", .{ html.len, html });
-        defer self.allocator.free(response);
-
-        try writer.writeAll(response);
+        if (std.mem.eql(u8, request.method, "POST")) {
+            // Parse form values
+            const approve = self.parseFormValue(request.body, "approve");
+            const deny = self.parseFormValue(request.body, "deny");
+            if (deny != null) {
+                // Denied by user
+                try self.sendBadRequest(writer, "Access denied by user");
+                return;
+            }
+            if (approve == null) {
+                try self.sendBadRequest(writer, "Missing approval");
+                return;
+            }
+            // Generate authorization code
+            const code = self.oauth_server.generateAuthorizationCode(client_id, user_id.?) catch |err| {
+                std.debug.print("Error generating code: {}\n", .{err});
+                try self.sendInternalError(writer);
+                return;
+            };
+            defer self.allocator.free(code);
+            if (is_oob) {
+                // Display code in HTML for OOB
+                const html = try std.fmt.allocPrint(self.allocator,
+                    "<!DOCTYPE html><html><head><title>Authorization Code</title></head><body><h1>Authorization Code</h1><p>Copy this code and paste it into your application:</p><pre style='font-size:1.5em;'>{s}</pre></body></html>",
+                    code);
+                defer self.allocator.free(html);
+                const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}", .{ html.len, html });
+                defer self.allocator.free(response);
+                try writer.writeAll(response);
+                return;
+            } else {
+                // Redirect with code
+                var redirect_url = try std.fmt.allocPrint(self.allocator, "{s}?code={s}", .{redirect_uri, code});
+                if (state) |s| {
+                    redirect_url = try std.fmt.allocPrint(self.allocator, "{s}&state={s}", .{redirect_url, s});
+                }
+                defer self.allocator.free(redirect_url);
+                const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n", .{redirect_url});
+                defer self.allocator.free(response);
+                try writer.writeAll(response);
+                return;
+            }
+        } else {
+            // Show consent form (existing logic)
+            const state_input = if (state) |s| try std.fmt.allocPrint(self.allocator, "<input type=\"hidden\" name=\"state\" value=\"{s}\">", s) else "";
+            defer if (state_input.len > 0) self.allocator.free(state_input);
+            const html = try std.fmt.allocPrint(self.allocator,
+                "<!DOCTYPE html><html><head><title>Authorize {s}</title></head><body><h1>Authorize {s}</h1><p>The application '{s}' wants to access your Maigo account.</p><form method='post' action='/oauth/authorize'><input type='hidden' name='client_id' value='{s}'><input type='hidden' name='redirect_uri' value='{s}'><input type='hidden' name='response_type' value='{s}'>{s}<button type='submit' name='approve' value='true'>Approve</button><button type='submit' name='deny' value='true'>Deny</button></form></body></html>",
+                client_data.name, client_data.name, client_data.name, client_id, redirect_uri, response_type, state_input);
+            defer self.allocator.free(html);
+            const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}", .{ html.len, html });
+            defer self.allocator.free(response);
+            try writer.writeAll(response);
+        }
     }
+// Password hashing (same as CLI/TUI)
+fn hashPassword(allocator: std.mem.Allocator, password: []const u8) ![]u8 {
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update("maigo_salt_");
+    hasher.update(password);
+    var hash_bytes: [32]u8 = undefined;
+    hasher.final(&hash_bytes);
+    var hex = try allocator.alloc(u8, 64);
+    for (hash_bytes, 0..) |byte, i| {
+        _ = std.fmt.formatIntBuf(hex[i*2..][0..2], byte, 16, .lower, .{});
+    }
+    return hex;
+}
 
     fn handleOAuthToken(self: *RouteHandler, writer: anytype, body: []const u8) !void {
         std.debug.print("OAuth token request body: {s}\n", .{body});
