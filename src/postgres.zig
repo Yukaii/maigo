@@ -23,7 +23,7 @@ pub const Database = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, config: DatabaseConfig) !Database {
-        var pool_config = pg.Pool.Config{
+        const pool_config = pg.Pool.Config{
             .size = config.max_connections,
             .connect = .{
                 .host = config.host,
