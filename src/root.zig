@@ -3,7 +3,7 @@ const testing = std.testing;
 
 pub const shortener = @import("shortener.zig");
 pub const server = @import("server.zig");
-pub const database = @import("database.zig");
+pub const database = @import("database_pg.zig");
 pub const database_pg = @import("database_pg.zig");
 pub const oauth = @import("oauth.zig");
 pub const libssh_server = @import("libssh_server.zig");

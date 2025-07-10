@@ -13,6 +13,8 @@ pub fn main() !void {
 
     if (args.len > 1 and std.mem.eql(u8, args[1], "server")) {
         // Start HTTP server
+
+        // Define server config
         const config = server.ServerConfig{
             .host = "127.0.0.1",
             .port = 8080,
@@ -21,7 +23,11 @@ pub fn main() !void {
         };
 
         // Initialize database (CLI client fixture is automatically created)
-        var db = try database.Database.init(allocator, config.db_path);
+        var db = try database.Database.init(allocator, .{
+            .database = "maigo",
+            .username = "postgres",
+            .password = "password",
+        });
         defer db.deinit();
 
         // Create CLI client credentials file for convenience
@@ -32,14 +38,13 @@ pub fn main() !void {
         try http_server.start();
     } else if (args.len > 1 and std.mem.eql(u8, args[1], "ssh-server")) {
         // Start libssh server (recommended)
-        const config = server.ServerConfig{
-            .host = "127.0.0.1",
-            .port = 8080,
-            .base_domain = "maigo.dev",
-            .db_path = "maigo.db",
-        };
 
-        var db = try database.Database.init(allocator, config.db_path);
+
+        var db = try database.Database.init(allocator, .{
+            .database = "maigo",
+            .username = "postgres",
+            .password = "password",
+        });
         defer db.deinit();
 
         var ssh_srv = try libssh_server.LibSSHServer.init(allocator, &db, "127.0.0.1", 2222);
@@ -55,7 +60,11 @@ pub fn main() !void {
         const name = args[2];
         const redirect_uri = args[3];
 
-        var db = try database.Database.init(allocator, "maigo.db");
+        var db = try database.Database.init(allocator, .{
+            .database = "maigo",
+            .username = "postgres",
+            .password = "password",
+        });
         defer db.deinit();
 
         var oauth_server = oauth.OAuthServer.init(allocator, &db);
@@ -322,7 +331,11 @@ fn handleCliLogin(allocator: std.mem.Allocator) !void {
             const password = std.mem.trim(u8, pass_input, " \r\n\t");
 
             // Verify credentials with database
-            var db = try database.Database.init(allocator, "maigo.db");
+            var db = try database.Database.init(allocator, .{
+                .database = "maigo",
+                .username = "postgres",
+                .password = "password",
+            });
             defer db.deinit();
 
             const user = try db.getUserByUsername(username);

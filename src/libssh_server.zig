@@ -1,14 +1,14 @@
 const std = @import("std");
 const libssh = @import("libssh.zig");
-const database = @import("database.zig");
+const database_pg = @import("database_pg.zig");
 const SSHTUI = @import("ssh_tui.zig").TUI;
 
 pub const LibSSHServer = struct {
     allocator: std.mem.Allocator,
-    db: *database.Database,
+    db: *database_pg.Database,
     ssh_server: libssh.SSHServer,
 
-    pub fn init(allocator: std.mem.Allocator, db: *database.Database, host: []const u8, port: u16) !LibSSHServer {
+    pub fn init(allocator: std.mem.Allocator, db: *database_pg.Database, host: []const u8, port: u16) !LibSSHServer {
         const ssh_server = try libssh.SSHServer.init(allocator, host, port);
 
         return LibSSHServer{
@@ -208,7 +208,7 @@ pub const LibSSHServer = struct {
 
 const ConnectionHandler = struct {
     allocator: std.mem.Allocator,
-    db: *database.Database,
+    db: *database_pg.Database,
     connection: *libssh.SSHConnection,
     authenticated: bool,
     channel: ?*libssh.SSHChannel,
@@ -534,7 +534,7 @@ fn handleRegistration(handler: *ConnectionHandler, channel: *libssh.SSHChannel) 
 
     // Insert user
     const user_id = handler.db.insertUser(username, email, password_hash) catch |err| {
-        if (err == database.DatabaseError.StepFailed) {
+    if (err == database_pg.DatabaseError.StepFailed) {
             const error_msg =
                 \\❌ Registration failed. Username or email may already exist.
                 \\

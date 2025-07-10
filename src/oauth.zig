@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const database = @import("database.zig");
+const database_pg = @import("database_pg.zig");
 
 pub const OAuthError = error{
     InvalidClient,
@@ -120,10 +120,10 @@ pub const TokenRequest = struct {
 
 pub const OAuthServer = struct {
     allocator: std.mem.Allocator,
-    db: *database.Database,
+    db: *database_pg.Database,
     rng: std.Random.DefaultPrng,
 
-    pub fn init(allocator: std.mem.Allocator, db: *database.Database) OAuthServer {
+    pub fn init(allocator: std.mem.Allocator, db: *database_pg.Database) OAuthServer {
         const rng = std.Random.DefaultPrng.init(blk: {
             var seed: u64 = undefined;
             std.crypto.random.bytes(std.mem.asBytes(&seed));
@@ -400,7 +400,7 @@ pub const OAuthServer = struct {
 test "oauth server basic operations" {
     const allocator = testing.allocator;
 
-    var db = try database.Database.init(allocator, ":memory:");
+    var db = try database_pg.Database.init(allocator, .{ .database = ":memory:" });
     defer db.deinit();
 
     var oauth_server = OAuthServer.init(allocator, &db);
@@ -433,7 +433,7 @@ test "oauth server basic operations" {
 test "oauth authorization code flow" {
     const allocator = testing.allocator;
 
-    var db = try database.Database.init(allocator, ":memory:");
+    var db = try database_pg.Database.init(allocator, .{ .database = ":memory:" });
     defer db.deinit();
 
     var oauth_server = OAuthServer.init(allocator, &db);
@@ -498,7 +498,7 @@ test "oauth authorization code flow" {
 test "oauth error cases" {
     const allocator = testing.allocator;
 
-    var db = try database.Database.init(allocator, ":memory:");
+    var db = try database_pg.Database.init(allocator, .{ .database = ":memory:" });
     defer db.deinit();
 
     var oauth_server = OAuthServer.init(allocator, &db);
@@ -547,7 +547,7 @@ test "response type parsing" {
 test "oauth refresh token flow" {
     const allocator = testing.allocator;
 
-    var db = try database.Database.init(allocator, ":memory:");
+    var db = try database_pg.Database.init(allocator, .{ .database = ":memory:" });
     defer db.deinit();
 
     var oauth_server = OAuthServer.init(allocator, &db);
@@ -627,7 +627,7 @@ test "oauth refresh token flow" {
 test "oauth token expiration" {
     const allocator = testing.allocator;
 
-    var db = try database.Database.init(allocator, ":memory:");
+    var db = try database_pg.Database.init(allocator, .{ .database = ":memory:" });
     defer db.deinit();
 
     var oauth_server = OAuthServer.init(allocator, &db);

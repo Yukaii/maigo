@@ -2,7 +2,8 @@ const std = @import("std");
 const net = std.net;
 const testing = std.testing;
 const shortener = @import("shortener.zig");
-const database = @import("database.zig");
+const database_pg = @import("database_pg.zig");
+const postgres = @import("postgres.zig");
 const oauth = @import("oauth.zig");
 
 pub const ServerConfig = struct {
@@ -68,11 +69,17 @@ pub const RouteHandler = struct {
     allocator: std.mem.Allocator,
     config: ServerConfig,
     url_shortener: shortener.Shortener,
-    db: database.Database,
+    db: database_pg.Database,
     oauth_server: oauth.OAuthServer,
 
     pub fn init(allocator: std.mem.Allocator, config: ServerConfig) !RouteHandler {
-        var db = try database.Database.init(allocator, config.db_path);
+    // Update to use the new Postgres config and Database
+    const pg_config: postgres.DatabaseConfig = .{
+        .database = "maigo",
+        .username = "postgres",
+        .password = "password",
+    }; // TODO: load from config if needed
+    var db = try database_pg.Database.init(allocator, pg_config);
 
         return RouteHandler{
             .allocator = allocator,
