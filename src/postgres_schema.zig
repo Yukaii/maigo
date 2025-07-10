@@ -122,10 +122,11 @@ fn execSQL(db: *postgres.Database, sql: []const u8) !void {
     };
     defer db.pool.release(conn);
 
-    _ = conn.query(sql, .{}) catch |err| {
+    var result = conn.query(sql, .{}) catch |err| {
         std.debug.print("Failed to execute SQL: {s}\nError: {}\n", .{ sql, err });
         return postgres.PostgresError.QueryFailed;
     };
+    defer result.deinit();
 }
 
 test "postgres schema creation" {

@@ -25,10 +25,11 @@ pub const UserRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id";
-        const result = conn.query(sql, .{ username, email, password_hash }) catch |err| {
+        var result = conn.query(sql, .{ username, email, password_hash }) catch |err| {
             std.debug.print("Failed to insert user: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        defer result.deinit();
 
         if (try result.next()) |row| {
             return @intCast(row.get(i64, 0));
@@ -45,10 +46,11 @@ pub const UserRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "SELECT id, username, email, password_hash, EXTRACT(EPOCH FROM created_at) FROM users WHERE username = $1";
-        const result = conn.query(sql, .{username}) catch |err| {
+        var result = conn.query(sql, .{username}) catch |err| {
             std.debug.print("Failed to query user: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        defer result.deinit();
 
         if (try result.next()) |row| {
             return User{
@@ -93,10 +95,11 @@ pub const OAuthClientRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "SELECT id, secret, name, redirect_uri, EXTRACT(EPOCH FROM created_at) FROM oauth_clients WHERE id = $1";
-        const result = conn.query(sql, .{id}) catch |err| {
+        var result = conn.query(sql, .{id}) catch |err| {
             std.debug.print("Failed to query OAuth client: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        defer result.deinit();
 
         if (try result.next()) |row| {
             return OAuthClient{
@@ -127,10 +130,11 @@ pub const UrlRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "INSERT INTO urls (short_code, target_url, user_id) VALUES ($1, $2, $3) RETURNING id";
-        const result = conn.query(sql, .{ short_code, target_url, user_id }) catch |err| {
+        var result = conn.query(sql, .{ short_code, target_url, user_id }) catch |err| {
             std.debug.print("Failed to insert URL: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        defer result.deinit();
 
         if (try result.next()) |row| {
             return @intCast(row.get(i64, 0));
@@ -147,10 +151,11 @@ pub const UrlRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "SELECT id, short_code, target_url, EXTRACT(EPOCH FROM created_at), hits, user_id FROM urls WHERE short_code = $1";
-        const result = conn.query(sql, .{short_code}) catch |err| {
+        var result = conn.query(sql, .{short_code}) catch |err| {
             std.debug.print("Failed to query URL: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        defer result.deinit();
 
         if (try result.next()) |row| {
             return Url{
@@ -188,10 +193,11 @@ pub const UrlRepository = struct {
         defer self.db.pool.release(conn);
 
         const sql = "SELECT 1 FROM urls WHERE short_code = $1 LIMIT 1";
-        const result = conn.query(sql, .{short_code}) catch |err| {
+        var result = conn.query(sql, .{short_code}) catch |err| {
             std.debug.print("Failed to check short code existence: {}\n", .{err});
             return postgres.PostgresError.QueryFailed;
         };
+        defer result.deinit();
 
         return try result.next() != null;
     }
