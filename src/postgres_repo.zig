@@ -31,7 +31,7 @@ pub const UserRepository = struct {
         };
 
         if (try result.next()) |row| {
-            return row.get(u64, 0);
+            return @intCast(row.get(i64, 0));
         } else {
             return postgres.PostgresError.QueryFailed;
         }
@@ -52,7 +52,7 @@ pub const UserRepository = struct {
 
         if (try result.next()) |row| {
             return User{
-                .id = row.get(u64, 0),
+                .id = @intCast(row.get(i64, 0)),
                 .username = try self.db.allocator.dupe(u8, row.get([]const u8, 1)),
                 .email = try self.db.allocator.dupe(u8, row.get([]const u8, 2)),
                 .password_hash = try self.db.allocator.dupe(u8, row.get([]const u8, 3)),
@@ -133,7 +133,7 @@ pub const UrlRepository = struct {
         };
 
         if (try result.next()) |row| {
-            return row.get(u64, 0);
+            return @intCast(row.get(i64, 0));
         } else {
             return postgres.PostgresError.QueryFailed;
         }
@@ -154,12 +154,12 @@ pub const UrlRepository = struct {
 
         if (try result.next()) |row| {
             return Url{
-                .id = row.get(u64, 0),
+                .id = @intCast(row.get(i64, 0)),
                 .short_code = try self.db.allocator.dupe(u8, row.get([]const u8, 1)),
                 .target_url = try self.db.allocator.dupe(u8, row.get([]const u8, 2)),
                 .created_at = @intFromFloat(row.get(f64, 3)),
-                .hits = row.get(u64, 4),
-                .user_id = row.get(?u64, 5),
+                .hits = @intCast(row.get(i64, 4)),
+                .user_id = if (row.get(?i64, 5)) |id| @as(u64, @intCast(id)) else null,
             };
         } else {
             return null;
