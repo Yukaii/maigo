@@ -15,7 +15,7 @@ pub const DatabaseConfig = struct {
     database: []const u8,
     username: []const u8,
     password: []const u8,
-    max_connections: u32 = 10,
+    max_connections: u16 = 10,
 };
 
 pub const Database = struct {
@@ -23,18 +23,19 @@ pub const Database = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, config: DatabaseConfig) !Database {
-        const pool_config = pg.Pool.Config{
+        const pool = pg.Pool.init(allocator, .{
             .size = config.max_connections,
             .connect = .{
                 .host = config.host,
                 .port = config.port,
-                .username = config.username,
-                .password = config.password,
-                .database = config.database,
             },
-        };
-
-        const pool = pg.Pool.init(allocator, pool_config) catch |err| {
+            .auth = .{
+                .username = config.username,
+                .database = config.database,
+                .password = config.password,
+                .timeout = 10_000,
+            },
+        }) catch |err| {
             std.debug.print("Failed to initialize PostgreSQL pool: {}\n", .{err});
             return PostgresError.ConnectionFailed;
         };

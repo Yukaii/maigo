@@ -166,6 +166,23 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 
+    // PostgreSQL integration test
+    const postgres_test = b.addExecutable(.{
+        .name = "test_postgres_integration",
+        .root_source_file = b.path("test_postgres_integration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    // Configure PostgreSQL test linking
+    configureLibraryLinking(b, postgres_test, libssh_include_dir, libssh_lib_dir);
+    postgres_test.root_module.addImport("pg", pg_dep.module("pg"));
+    postgres_test.step.dependOn(build_libssh_step);
+    
+    const postgres_test_run = b.addRunArtifact(postgres_test);
+    const postgres_test_step = b.step("test-postgres", "Run PostgreSQL integration test");
+    postgres_test_step.dependOn(&postgres_test_run.step);
+
     // Custom build steps for development
     const clean_step = b.step("clean", "Clean build artifacts and libssh build");
     const clean_cmd = b.addSystemCommand(&.{ "sh", "-c", "rm -rf zig-out zig-cache deps/libssh/build" });

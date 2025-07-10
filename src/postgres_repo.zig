@@ -30,7 +30,7 @@ pub const UserRepository = struct {
             return postgres.PostgresError.QueryFailed;
         };
 
-        if (result.next()) |row| {
+        if (try result.next()) |row| {
             return row.get(u64, 0);
         } else {
             return postgres.PostgresError.QueryFailed;
@@ -50,7 +50,7 @@ pub const UserRepository = struct {
             return postgres.PostgresError.QueryFailed;
         };
 
-        if (result.next()) |row| {
+        if (try result.next()) |row| {
             return User{
                 .id = row.get(u64, 0),
                 .username = try self.db.allocator.dupe(u8, row.get([]const u8, 1)),
@@ -98,7 +98,7 @@ pub const OAuthClientRepository = struct {
             return postgres.PostgresError.QueryFailed;
         };
 
-        if (result.next()) |row| {
+        if (try result.next()) |row| {
             return OAuthClient{
                 .id = try self.db.allocator.dupe(u8, row.get([]const u8, 0)),
                 .secret = try self.db.allocator.dupe(u8, row.get([]const u8, 1)),
@@ -132,7 +132,7 @@ pub const UrlRepository = struct {
             return postgres.PostgresError.QueryFailed;
         };
 
-        if (result.next()) |row| {
+        if (try result.next()) |row| {
             return row.get(u64, 0);
         } else {
             return postgres.PostgresError.QueryFailed;
@@ -152,7 +152,7 @@ pub const UrlRepository = struct {
             return postgres.PostgresError.QueryFailed;
         };
 
-        if (result.next()) |row| {
+        if (try result.next()) |row| {
             return Url{
                 .id = row.get(u64, 0),
                 .short_code = try self.db.allocator.dupe(u8, row.get([]const u8, 1)),
@@ -193,7 +193,7 @@ pub const UrlRepository = struct {
             return postgres.PostgresError.QueryFailed;
         };
 
-        return result.next() != null;
+        return try result.next() != null;
     }
 };
 
