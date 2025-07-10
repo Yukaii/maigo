@@ -34,33 +34,37 @@ pub fn getCliClientCredentials() CliClientCredentials {
 
 /// PostgreSQL-backed database implementation
 pub const Database = struct {
-    postgres_db: postgres.Database,
+    postgres_db: *postgres.Database,
     users: postgres_repo.UserRepository,
     oauth_clients: postgres_repo.OAuthClientRepository,
     urls: postgres_repo.UrlRepository,
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, config: postgres.DatabaseConfig) !Database {
-        var postgres_db = try postgres.Database.init(allocator, config);
-        
+        const db_ptr = try allocator.create(postgres.Database);
+        db_ptr.* = try postgres.Database.init(allocator, config);
+
         // Create schema
-        try postgres_schema.createTables(&postgres_db);
-        
+        try postgres_schema.createTables(db_ptr);
+
         // Initialize repositories
         var db = Database{
-            .postgres_db = postgres_db,
-            .users = postgres_repo.UserRepository.init(&postgres_db),
-            .oauth_clients = postgres_repo.OAuthClientRepository.init(&postgres_db),
-            .urls = postgres_repo.UrlRepository.init(&postgres_db),
+            .postgres_db = db_ptr,
+            .users = postgres_repo.UserRepository.init(db_ptr),
+            .oauth_clients = postgres_repo.OAuthClientRepository.init(db_ptr),
+            .urls = postgres_repo.UrlRepository.init(db_ptr),
+            .allocator = allocator,
         };
-        
+
         // Insert CLI client fixture
         try db.insertCliClientFixture();
-        
+
         return db;
     }
 
     pub fn deinit(self: *Database) void {
-        self.postgres_db.deinit();
+    self.postgres_db.deinit();
+    self.allocator.destroy(self.postgres_db);
     }
 
     fn insertCliClientFixture(self: *Database) !void {
