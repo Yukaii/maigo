@@ -1,0 +1,6 @@
+{
+    "github.copilot.chat.agent.terminal.allowList": {
+        "zig build": true,
+        "psql": true
+    }
+}
