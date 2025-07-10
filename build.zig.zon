@@ -36,7 +36,10 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        // No external dependencies - we use only standard library and system libraries
+        .pg = .{
+            .url = "https://github.com/karlseguin/pg.zig/archive/refs/heads/master.tar.gz",
+            .hash = "1220d3e812c70f5afb84db55797b3ac896c506435aaf8b98f990c12a719a36d8a030",
+        },
     },
     .paths = .{
         "build.zig",

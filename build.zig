@@ -15,6 +15,12 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // Add pg.zig dependency
+    const pg_dep = b.dependency("pg", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // libssh build configuration
     const libssh_build_dir = "deps/libssh/build";
     const libssh_lib_dir = b.fmt("{s}/lib", .{libssh_build_dir});
@@ -65,6 +71,10 @@ pub fn build(b: *std.Build) void {
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
     exe_mod.addImport("maigo_lib", lib_mod);
+    
+    // Add pg module to both lib and exe modules
+    lib_mod.addImport("pg", pg_dep.module("pg"));
+    exe_mod.addImport("pg", pg_dep.module("pg"));
 
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
