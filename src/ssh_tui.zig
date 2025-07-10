@@ -16,8 +16,11 @@ pub const TUI = struct {
 
     const Screen = enum {
         main_menu,
-        registration,
-        login,
+        registration_username,
+        registration_password,
+        registration_confirm,
+        login_username,
+        login_password,
         success,
     };
 
@@ -101,8 +104,46 @@ pub const TUI = struct {
     fn handleEnter(self: *TUI) !void {
         switch (self.current_screen) {
             .main_menu => {},
-            .registration => try self.processRegistration(),
-            .login => try self.processLogin(),
+            .registration_username => {
+                if (self.username_buffer.items.len < 3) {
+                    self.status_message = "Username must be at least 3 characters";
+                    self.status_type = .err;
+                    return;
+                }
+                self.current_screen = .registration_password;
+                self.status_message = "Enter your password (min 6 chars)";
+                self.status_type = .info;
+            },
+            .registration_password => {
+                if (self.password_buffer.items.len < 6) {
+                    self.status_message = "Password must be at least 6 characters";
+                    self.status_type = .err;
+                    return;
+                }
+                try self.processRegistration();
+            },
+            .registration_confirm => {
+                // Not implemented, fallback to main menu
+                self.current_screen = .main_menu;
+            },
+            .login_username => {
+                if (self.username_buffer.items.len == 0) {
+                    self.status_message = "Username cannot be empty";
+                    self.status_type = .err;
+                    return;
+                }
+                self.current_screen = .login_password;
+                self.status_message = "Enter your password";
+                self.status_type = .info;
+            },
+            .login_password => {
+                if (self.password_buffer.items.len == 0) {
+                    self.status_message = "Password cannot be empty";
+                    self.status_type = .err;
+                    return;
+                }
+                try self.processLogin();
+            },
             .success => {
                 self.current_screen = .main_menu;
                 self.status_message = null;
@@ -112,10 +153,14 @@ pub const TUI = struct {
 
     fn handleBackspace(self: *TUI) !void {
         switch (self.current_screen) {
-            .registration, .login => {
-                // Remove last character from current input buffer
+            .registration_username, .login_username => {
                 if (self.username_buffer.items.len > 0) {
                     _ = self.username_buffer.pop();
+                }
+            },
+            .registration_password, .login_password => {
+                if (self.password_buffer.items.len > 0) {
+                    _ = self.password_buffer.pop();
                 }
             },
             else => {},
@@ -125,15 +170,15 @@ pub const TUI = struct {
     fn handleMenuChoice(self: *TUI, choice: u8) !void {
         switch (choice) {
             '1' => {
-                self.current_screen = .registration;
+                self.current_screen = .registration_username;
                 self.clearBuffers();
-                self.status_message = "Enter your registration details";
+                self.status_message = "Enter your username (min 3 chars)";
                 self.status_type = .info;
             },
             '2' => {
-                self.current_screen = .login;
+                self.current_screen = .login_username;
                 self.clearBuffers();
-                self.status_message = "Enter your login credentials";
+                self.status_message = "Enter your username";
                 self.status_type = .info;
             },
             '3' => self.should_quit = true,
@@ -143,8 +188,11 @@ pub const TUI = struct {
 
     fn handlePrintableChar(self: *TUI, char: u8) !void {
         switch (self.current_screen) {
-            .registration, .login => {
+            .registration_username, .login_username => {
                 try self.username_buffer.append(char);
+            },
+            .registration_password, .login_password => {
+                try self.password_buffer.append(char);
             },
             else => {},
         }
@@ -152,15 +200,8 @@ pub const TUI = struct {
 
     fn processRegistration(self: *TUI) !void {
         const username = self.username_buffer.items;
-        if (username.len < 3) {
-            self.status_message = "Username must be at least 3 characters";
-            self.status_type = .err;
-            return;
-        }
-
-        // For demo, we'll use fixed email and password
-        const email = "demo@example.com";
-        const password = "password123";
+        const password = self.password_buffer.items;
+        const email = "demo@example.com"; // For now, skip email input
 
         // Hash password
         const password_hash = try self.hashPassword(password);
@@ -192,11 +233,7 @@ pub const TUI = struct {
 
     fn processLogin(self: *TUI) !void {
         const username = self.username_buffer.items;
-        if (username.len == 0) {
-            self.status_message = "Username cannot be empty";
-            self.status_type = .err;
-            return;
-        }
+        const password = self.password_buffer.items;
 
         const user_result = try self.db.getUserByUsername(username);
         if (user_result == null) {
@@ -208,9 +245,20 @@ pub const TUI = struct {
         var user = user_result.?;
         defer user.deinit(self.allocator);
 
+        // Hash entered password and compare
+        const password_hash = try self.hashPassword(password);
+        defer self.allocator.free(password_hash);
+
+        if (!std.mem.eql(u8, user.password_hash, password_hash)) {
+            self.status_message = "Incorrect password";
+            self.status_type = .err;
+            return;
+        }
+
         self.status_message = try std.fmt.allocPrint(self.allocator, "Welcome back, {s}!", .{user.username});
         self.status_type = .success;
         self.current_screen = .success;
+        self.clearBuffers();
     }
 
     fn clearBuffers(self: *TUI) void {
@@ -231,8 +279,8 @@ pub const TUI = struct {
         // Draw title bar
         const title = switch (self.current_screen) {
             .main_menu => "MAIGO URL SHORTENER - Main Menu",
-            .registration => "MAIGO URL SHORTENER - Registration",
-            .login => "MAIGO URL SHORTENER - Login",
+            .registration_username, .registration_password, .registration_confirm => "MAIGO URL SHORTENER - Registration",
+            .login_username, .login_password => "MAIGO URL SHORTENER - Login",
             .success => "MAIGO URL SHORTENER - Success",
         };
 
@@ -250,8 +298,11 @@ pub const TUI = struct {
         // Draw screen-specific content
         switch (self.current_screen) {
             .main_menu => try self.drawMainMenu(&buffer),
-            .registration => try self.drawRegistration(&buffer),
-            .login => try self.drawLogin(&buffer),
+            .registration_username => try self.drawRegistrationUsername(&buffer),
+            .registration_password => try self.drawRegistrationPassword(&buffer),
+            .registration_confirm => try self.drawRegistrationPassword(&buffer), // fallback, not used yet
+            .login_username => try self.drawLoginUsername(&buffer),
+            .login_password => try self.drawLoginPassword(&buffer),
             .success => try self.drawSuccess(&buffer),
         }
 
@@ -285,20 +336,48 @@ pub const TUI = struct {
         try buffer.appendSlice("\r\n");
     }
 
-    fn drawRegistration(self: *TUI, buffer: *std.ArrayList(u8)) !void {
+    fn drawRegistrationUsername(self: *TUI, buffer: *std.ArrayList(u8)) !void {
         try buffer.appendSlice("  Create a new account:\r\n\r\n");
         try buffer.appendSlice("  Username: ");
-
-        // Show current input
         if (self.username_buffer.items.len > 0) {
-            try buffer.appendSlice("\x1b[32m"); // Green color
+            try buffer.appendSlice("\x1b[32m");
             try buffer.appendSlice(self.username_buffer.items);
-            try buffer.appendSlice("\x1b[0m"); // Reset color
+            try buffer.appendSlice("\x1b[0m");
         }
-
         try buffer.appendSlice("\r\n\r\n");
-        try buffer.appendSlice("  Type username and press Enter to register\r\n");
-        try buffer.appendSlice("  \x1b[90m(Demo: uses fixed email/password)\x1b[0m\r\n\r\n");
+        try buffer.appendSlice("  Type username and press Enter\r\n");
+        try buffer.appendSlice("  Press Ctrl+C to exit\r\n");
+    }
+
+    fn drawRegistrationPassword(self: *TUI, buffer: *std.ArrayList(u8)) !void {
+        try buffer.appendSlice("  Create a new account:\r\n\r\n");
+        try buffer.appendSlice("  Password: ");
+        // Show asterisks for password
+        for (0..self.password_buffer.items.len) |_| try buffer.append('*');
+        try buffer.appendSlice("\r\n\r\n");
+        try buffer.appendSlice("  Type password and press Enter\r\n");
+        try buffer.appendSlice("  Press Ctrl+C to exit\r\n");
+    }
+
+    fn drawLoginUsername(self: *TUI, buffer: *std.ArrayList(u8)) !void {
+        try buffer.appendSlice("  Sign in to your account:\r\n\r\n");
+        try buffer.appendSlice("  Username: ");
+        if (self.username_buffer.items.len > 0) {
+            try buffer.appendSlice("\x1b[32m");
+            try buffer.appendSlice(self.username_buffer.items);
+            try buffer.appendSlice("\x1b[0m");
+        }
+        try buffer.appendSlice("\r\n\r\n");
+        try buffer.appendSlice("  Type username and press Enter\r\n");
+        try buffer.appendSlice("  Press Ctrl+C to exit\r\n");
+    }
+
+    fn drawLoginPassword(self: *TUI, buffer: *std.ArrayList(u8)) !void {
+        try buffer.appendSlice("  Sign in to your account:\r\n\r\n");
+        try buffer.appendSlice("  Password: ");
+        for (0..self.password_buffer.items.len) |_| try buffer.append('*');
+        try buffer.appendSlice("\r\n\r\n");
+        try buffer.appendSlice("  Type password and press Enter\r\n");
         try buffer.appendSlice("  Press Ctrl+C to exit\r\n");
     }
 
