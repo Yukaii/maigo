@@ -1,6 +1,31 @@
 const std = @import("std");
-
-const TOKEN_PATH = "/Users/yukai/.maigo_tokens.json"; // TODO: use home dir dynamically
+const builtin = @import("builtin");
+// Cross-platform config path helper for tokens.json
+fn getTokenPath(allocator: std.mem.Allocator) ![]u8 {
+    const os = builtin.os.tag;
+    if (os == .windows) {
+        if (std.os.getenv("APPDATA")) |appdata| {
+            return std.fmt.allocPrint(allocator, "{s}\\maigo\\tokens.json", .{appdata});
+        } else {
+            // fallback to current dir
+            return std.fmt.allocPrint(allocator, "tokens.json", .{});
+        }
+    } else if (os == .macos) {
+        if (std.posix.getenv("HOME")) |home| {
+            return std.fmt.allocPrint(allocator, "{s}/Library/Application Support/maigo/tokens.json", .{home});
+        } else {
+            return std.fmt.allocPrint(allocator, "tokens.json", .{});
+        }
+    } else { // Linux, BSD, etc.
+        if (std.posix.getenv("XDG_CONFIG_HOME")) |xdg| {
+            return std.fmt.allocPrint(allocator, "{s}/maigo/tokens.json", .{xdg});
+        } else if (std.posix.getenv("HOME")) |home| {
+            return std.fmt.allocPrint(allocator, "{s}/.config/maigo/tokens.json", .{home});
+        } else {
+            return std.fmt.allocPrint(allocator, "tokens.json", .{});
+        }
+    }
+}
 const AUTH_URL = "http://127.0.0.1:8080/oauth/authorize";
 const TOKEN_URL = "http://127.0.0.1:8080/oauth/token";
 const CLIENT_ID = "cli-demo"; // TODO: register and use real client_id
@@ -12,7 +37,9 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Step 1: Try to load tokens from disk
-    var tokens = try loadTokens(allocator);
+    const token_path = try getTokenPath(allocator);
+    defer allocator.free(token_path);
+    var tokens = try loadTokens(allocator, token_path);
     defer if (tokens) |*t| t.deinit(allocator);
 
     if (tokens) |t| {
@@ -36,7 +63,7 @@ pub fn main() !void {
 
     // Step 2: Start OOB Authorization Code Grant
     const url = try std.fmt.allocPrint(allocator,
-        "{s}?response_type=code&client_id={s}&redirect_uri={s}&scope=url:read url:write",
+        "{s}?response_type=code&client_id={s}&redirect_uri={s}&scope=url:read%20url:write",
         .{AUTH_URL, CLIENT_ID, REDIRECT_URI});
     defer allocator.free(url);
 
@@ -73,8 +100,8 @@ const TokenSet = struct {
     }
 };
 
-fn loadTokens(allocator: std.mem.Allocator) !?TokenSet {
-    var file = std.fs.cwd().openFile(TOKEN_PATH, .{}) catch return null;
+fn loadTokens(allocator: std.mem.Allocator, token_path: []const u8) !?TokenSet {
+    var file = std.fs.openFileAbsolute(token_path, .{}) catch return null;
     defer file.close();
     var buf: [512]u8 = undefined;
     const n = try file.readAll(&buf);
@@ -101,7 +128,21 @@ fn loadTokens(allocator: std.mem.Allocator) !?TokenSet {
 }
 
 fn saveTokens(tokens: TokenSet) !void {
-    var file = try std.fs.cwd().createFile(TOKEN_PATH, .{ .truncate = true });
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const token_path = try getTokenPath(allocator);
+    defer allocator.free(token_path);
+    // Ensure parent directory exists
+    const sep = if (builtin.os.tag == .windows) "\\" else "/";
+    const last_slash = std.mem.lastIndexOf(u8, token_path, sep);
+    if (last_slash) |idx| {
+        const dir = token_path[0..idx];
+        std.fs.makeDirAbsolute(dir) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+    var file = try std.fs.createFileAbsolute(token_path, .{ .truncate = true });
     defer file.close();
     const refresh = if (tokens.refresh_token) |rt| rt else "";
     const json = try std.fmt.allocPrint(std.heap.page_allocator,
