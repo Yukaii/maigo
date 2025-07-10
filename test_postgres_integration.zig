@@ -11,12 +11,12 @@ pub fn main() !void {
     std.debug.print("PostgreSQL Database Integration Test\n", .{});
     std.debug.print("=====================================\n\n", .{});
 
-    // Check if PostgreSQL connection parameters are available
+    // Use standard PostgreSQL defaults for local development
     const postgres_host = std.posix.getenv("POSTGRES_HOST") orelse "localhost";
     const postgres_port = std.posix.getenv("POSTGRES_PORT") orelse "5432";
-    const postgres_db = std.posix.getenv("POSTGRES_DB") orelse "maigo_test";
-    const postgres_user = std.posix.getenv("POSTGRES_USER") orelse "postgres";
-    const postgres_password = std.posix.getenv("POSTGRES_PASSWORD") orelse "password";
+    const postgres_db = std.posix.getenv("POSTGRES_TEST_DB") orelse "maigo_test";
+    const postgres_user = std.posix.getenv("POSTGRES_USER") orelse std.posix.getenv("USER") orelse "postgres";
+    const postgres_password = std.posix.getenv("POSTGRES_PASSWORD") orelse "";
 
     std.debug.print("Connection parameters:\n", .{});
     std.debug.print("Host: {s}\n", .{postgres_host});
@@ -35,16 +35,20 @@ pub fn main() !void {
 
     var db = database_pg.Database.init(allocator, config) catch |err| {
         std.debug.print("Failed to connect to PostgreSQL: {}\n", .{err});
-        std.debug.print("\nTo test PostgreSQL integration, ensure you have:\n", .{});
-        std.debug.print("1. PostgreSQL running on localhost:5432\n", .{});
-        std.debug.print("2. Database 'maigo_test' created\n", .{});
-        std.debug.print("3. User 'postgres' with password 'password'\n", .{});
-        std.debug.print("\nOr set environment variables:\n", .{});
-        std.debug.print("POSTGRES_HOST=<host>\n", .{});
-        std.debug.print("POSTGRES_PORT=<port>\n", .{});
-        std.debug.print("POSTGRES_DB=<database>\n", .{});
-        std.debug.print("POSTGRES_USER=<username>\n", .{});
-        std.debug.print("POSTGRES_PASSWORD=<password>\n", .{});
+        std.debug.print("\nTo test PostgreSQL integration:\n", .{});
+        std.debug.print("1. Ensure PostgreSQL is running locally\n", .{});
+        std.debug.print("2. Run: ./scripts/setup_postgres.sh\n", .{});
+        std.debug.print("3. Re-run: zig build test-postgres\n", .{});
+        std.debug.print("\nQuick setup:\n", .{});
+        std.debug.print("  # Install PostgreSQL (macOS)\n", .{});
+        std.debug.print("  brew install postgresql\n", .{});
+        std.debug.print("  brew services start postgresql\n", .{});
+        std.debug.print("  \n", .{});
+        std.debug.print("  # Setup databases\n", .{});
+        std.debug.print("  ./scripts/setup_postgres.sh\n", .{});
+        std.debug.print("  \n", .{});
+        std.debug.print("  # Run tests\n", .{});
+        std.debug.print("  zig build test-postgres\n", .{});
         return;
     };
     defer db.deinit();

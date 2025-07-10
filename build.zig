@@ -183,6 +183,31 @@ pub fn build(b: *std.Build) void {
     const postgres_test_step = b.step("test-postgres", "Run PostgreSQL integration test");
     postgres_test_step.dependOn(&postgres_test_run.step);
 
+    // PostgreSQL debug test  
+    const postgres_debug = b.addExecutable(.{
+        .name = "debug_postgres",
+        .root_source_file = b.path("debug_postgres.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    configureLibraryLinking(b, postgres_debug, libssh_include_dir, libssh_lib_dir);
+    postgres_debug.root_module.addImport("pg", pg_dep.module("pg"));
+    postgres_debug.step.dependOn(build_libssh_step);
+    
+    const postgres_debug_run = b.addRunArtifact(postgres_debug);
+    const postgres_debug_step = b.step("debug-postgres", "Run PostgreSQL debug test");
+    postgres_debug_step.dependOn(&postgres_debug_run.step);
+
+    // Database setup commands
+    const setup_db_cmd = b.addSystemCommand(&.{ "sh", "scripts/setup_postgres.sh", "test" });
+    const setup_db_step = b.step("setup-db", "Setup PostgreSQL test database");
+    setup_db_step.dependOn(&setup_db_cmd.step);
+
+    const reset_db_cmd = b.addSystemCommand(&.{ "sh", "scripts/setup_postgres.sh", "reset" });
+    const reset_db_step = b.step("reset-db", "Reset PostgreSQL databases");
+    reset_db_step.dependOn(&reset_db_cmd.step);
+
     // Custom build steps for development
     const clean_step = b.step("clean", "Clean build artifacts and libssh build");
     const clean_cmd = b.addSystemCommand(&.{ "sh", "-c", "rm -rf zig-out zig-cache deps/libssh/build" });
