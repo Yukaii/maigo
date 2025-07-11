@@ -1,4 +1,4 @@
-.PHONY: help setup build test lint fmt clean dev server ssh-server migrate-up migrate-down db-setup db-reset db-seed
+.PHONY: help setup build test test-unit test-integration test-setup test-clean lint fmt clean dev server ssh-server migrate-up migrate-down db-setup db-reset db-seed
 .DEFAULT_GOAL := help
 
 # Variables
@@ -48,21 +48,34 @@ dev:
 	air
 
 ## test: Run all tests
-test:
-	@echo "Running tests..."
-	go test -v -race -coverprofile=$(COVERAGE_FILE) ./...
-	go tool cover -html=$(COVERAGE_FILE) -o coverage.html
-	@echo "Coverage report generated: coverage.html"
+test: test-unit test-integration
 
 ## test-unit: Run unit tests only
 test-unit:
 	@echo "Running unit tests..."
-	go test -v -short ./...
+	go test -v -race -short ./internal/...
 
 ## test-integration: Run integration tests
-test-integration:
+test-integration: test-setup
 	@echo "Running integration tests..."
-	go test -v -run Integration ./...
+	CONFIG_PATH=config/test.yaml go test -v ./tests/...
+
+## test-setup: Set up test database
+test-setup:
+	@echo "Setting up test database..."
+	./scripts/setup_test_db.sh
+
+## test-clean: Clean up test database
+test-clean:
+	@echo "Cleaning up test database..."
+	PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d postgres -c "DROP DATABASE IF EXISTS maigo_test;" || true
+
+## coverage: Generate test coverage report
+coverage:
+	@echo "Generating coverage report..."
+	go test -v -race -coverprofile=$(COVERAGE_FILE) ./...
+	go tool cover -html=$(COVERAGE_FILE) -o coverage.html
+	@echo "Coverage report generated: coverage.html"
 
 ## benchmark: Run benchmarks
 benchmark:
