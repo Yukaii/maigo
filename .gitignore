@@ -1,6 +1,5 @@
 # Binaries
 maigo
-server
 *.exe
 *.exe~
 *.dll
