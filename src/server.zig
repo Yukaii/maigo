@@ -21,8 +21,25 @@ fn getSession(session_id: []const u8) ?u64 {
 }
 
 fn clearSession(session_id: []const u8) void {
-    session_store.remove(session_id);
+    _ = session_store.remove(session_id);
 }
+
+// Extract session_id from Cookie header
+fn getSessionIdFromRequest(request: HttpRequest) ?[]const u8 {
+    // Look for "Cookie: maigo_session=..."
+    const cookie_header = request.cookie;
+    if (cookie_header) |cookie| {
+        const key_to_find = SESSION_COOKIE_NAME ++ "=";
+        var parts = std.mem.splitSequence(u8, cookie, "; ");
+        while (parts.next()) |part| {
+            if (std.mem.startsWith(u8, part, key_to_find)) {
+                return part[key_to_find.len..];
+            }
+        }
+    }
+    return null;
+}
+
 const std = @import("std");
 const net = std.net;
 const testing = std.testing;
@@ -30,6 +47,20 @@ const shortener = @import("shortener.zig");
 const database_pg = @import("database_pg.zig");
 const postgres = @import("postgres.zig");
 const oauth = @import("oauth.zig");
+
+// Password hashing (same as CLI/TUI)
+fn hashPassword(allocator: std.mem.Allocator, password: []const u8) ![]u8 {
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update("maigo_salt_");
+    hasher.update(password);
+    var hash_bytes: [32]u8 = undefined;
+    hasher.final(&hash_bytes);
+    var hex = try allocator.alloc(u8, 64);
+    for (hash_bytes, 0..) |byte, i| {
+        _ = std.fmt.formatIntBuf(hex[i * 2 ..][0..2], byte, 16, .lower, .{});
+    }
+    return hex;
+}
 
 pub const ServerConfig = struct {
     host: []const u8 = "127.0.0.1",
@@ -44,6 +75,7 @@ pub const HttpRequest = struct {
     host: []const u8,
     body: []const u8,
     authorization: ?[]const u8,
+    cookie: ?[]const u8,
 
     pub fn parse(allocator: std.mem.Allocator, raw_request: []const u8) !HttpRequest {
         var lines = std.mem.splitSequence(u8, raw_request, "\r\n");
@@ -57,6 +89,7 @@ pub const HttpRequest = struct {
         // Parse headers
         var host: []const u8 = "";
         var authorization: ?[]const u8 = null;
+        var cookie: ?[]const u8 = null;
         while (lines.next()) |line| {
             if (line.len == 0) break; // Empty line marks end of headers
 
@@ -64,6 +97,8 @@ pub const HttpRequest = struct {
                 host = line[6..];
             } else if (std.mem.startsWith(u8, line, "Authorization: ")) {
                 authorization = try allocator.dupe(u8, line[15..]);
+            } else if (std.mem.startsWith(u8, line, "Cookie: ")) {
+                cookie = try allocator.dupe(u8, line[8..]);
             }
         }
 
@@ -76,6 +111,7 @@ pub const HttpRequest = struct {
             .host = try allocator.dupe(u8, host),
             .body = try allocator.dupe(u8, body),
             .authorization = authorization,
+            .cookie = cookie,
         };
     }
 
@@ -86,6 +122,9 @@ pub const HttpRequest = struct {
         allocator.free(self.body);
         if (self.authorization) |auth| {
             allocator.free(auth);
+        }
+        if (self.cookie) |c| {
+            allocator.free(c);
         }
     }
 };
@@ -98,13 +137,13 @@ pub const RouteHandler = struct {
     oauth_server: oauth.OAuthServer,
 
     pub fn init(allocator: std.mem.Allocator, config: ServerConfig) !RouteHandler {
-    // Update to use the new Postgres config and Database
-    const pg_config: postgres.DatabaseConfig = .{
-        .database = "maigo",
-        .username = "postgres",
-        .password = "password",
-    }; // TODO: load from config if needed
-    var db = try database_pg.Database.init(allocator, pg_config);
+        // Update to use the new Postgres config and Database
+        const pg_config: postgres.DatabaseConfig = .{
+            .database = "maigo",
+            .username = "postgres",
+            .password = "password",
+        }; // TODO: load from config if needed
+        var db = try database_pg.Database.init(allocator, pg_config);
 
         return RouteHandler{
             .allocator = allocator,
@@ -155,19 +194,7 @@ pub const RouteHandler = struct {
         }
     }
 
-    // Extract session_id from Cookie header
-    fn getSessionIdFromRequest(request: HttpRequest) ?[]const u8 {
-        // Look for "Cookie: maigo_session=..."
-        const cookie_header = RouteHandler.getHeader(request, "Cookie");
-        if (cookie_header) |cookie| {
-            if (std.mem.indexOf(u8, cookie, SESSION_COOKIE_NAME ++ "=")) |idx| {
-                const start = idx + SESSION_COOKIE_NAME.len + 1;
-                const end = std.mem.indexOfPos(u8, cookie, start, ";") orelse cookie.len;
-                return cookie[start..end];
-            }
-        }
-        return null;
-    }
+    // Extract session_id from Cookie header - MOVED to file scope
 
     fn getHeader(unused_request: HttpRequest, unused_name: []const u8) ?[]const u8 {
         // Only Cookie is supported for now
@@ -175,19 +202,14 @@ pub const RouteHandler = struct {
         _ = unused_request;
         _ = unused_name;
         return null;
-
     }
 
     fn handleLoginGet(self: *RouteHandler, writer: anytype, request: HttpRequest) !void {
         // Show login form
         const return_to = self.parseQueryValue(request.path, "return_to") orelse "/";
-            const html = try std.fmt.allocPrint(self.allocator,
-                "<!DOCTYPE html><html><head><title>Login</title></head><body><h1>Login</h1><form method='post' action='/login'><input type='hidden' name='return_to' value=\"{s}\"><label>Username: <input name='username'></label><br><label>Password: <input type='password' name='password'></label><br><button type='submit'>Login</button></form></body></html>",
-                .{return_to});
+        const html = try std.fmt.allocPrint(self.allocator, "<!DOCTYPE html><html><head><title>Login</title></head><body><h1>Login</h1><form method='post' action='/login'><input type='hidden' name='return_to' value=\"{s}\"><label>Username: <input name='username'></label><br><label>Password: <input type='password' name='password'></label><br><button type='submit'>Login</button></form></body></html>", .{return_to});
         defer self.allocator.free(html);
-        const response = try std.fmt.allocPrint(self.allocator,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}",
-            .{ html.len, html });
+        const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}", .{ html.len, html });
         defer self.allocator.free(response);
         try writer.writeAll(response);
     }
@@ -227,13 +249,9 @@ pub const RouteHandler = struct {
         const session_id = try generateSessionId(self.allocator);
         setSession(session_id, u.id);
         // Set cookie and redirect
-        const set_cookie = try std.fmt.allocPrint(self.allocator,
-            "Set-Cookie: {s}={s}; HttpOnly; Path=/; Max-Age={d}",
-            .{ SESSION_COOKIE_NAME, session_id, SESSION_DURATION_SECS });
+        const set_cookie = try std.fmt.allocPrint(self.allocator, "Set-Cookie: {s}={s}; HttpOnly; Path=/; Max-Age={d}", .{ SESSION_COOKIE_NAME, session_id, SESSION_DURATION_SECS });
         defer self.allocator.free(set_cookie);
-        const response = try std.fmt.allocPrint(self.allocator,
-            "HTTP/1.1 302 Found\r\n{s}\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n",
-            .{ set_cookie, return_to });
+        const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 302 Found\r\n{s}\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n", .{ set_cookie, return_to });
         defer self.allocator.free(response);
         try writer.writeAll(response);
     }
@@ -276,10 +294,10 @@ pub const RouteHandler = struct {
     fn handleListUrls(self: *RouteHandler, writer: anytype, user_id: u64) !void {
         // TODO: Implement database method to get all URLs for a user
         // For now, return a simple JSON response
-    const json_response = try std.fmt.allocPrint(self.allocator, "{{\"urls\":[],\"user_id\":{d}}}", .{user_id});
+        const json_response = try std.fmt.allocPrint(self.allocator, "{{\"urls\":[],\"user_id\":{d}}}", .{user_id});
         defer self.allocator.free(json_response);
 
-    const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ json_response.len, json_response });
+        const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ json_response.len, json_response });
         defer self.allocator.free(response);
 
         try writer.writeAll(response);
@@ -291,7 +309,7 @@ pub const RouteHandler = struct {
         // TODO: Implement database method to get specific URL by ID and verify ownership
         const json_response = "{\"error\":\"Not implemented yet\"}";
 
-    const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 501 Not Implemented\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ json_response.len, json_response });
+        const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 501 Not Implemented\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}", .{ json_response.len, json_response });
         defer self.allocator.free(response);
 
         try writer.writeAll(response);
@@ -567,7 +585,7 @@ pub const RouteHandler = struct {
         defer if (state) |s| self.allocator.free(s);
 
         // Check session
-    const session_id = RouteHandler.getSessionIdFromRequest(request);
+        const session_id = getSessionIdFromRequest(request);
         const user_id = if (session_id) |sid| getSession(sid) else null;
         if (user_id == null) {
             // Not logged in, redirect to login
@@ -633,9 +651,7 @@ pub const RouteHandler = struct {
             defer self.allocator.free(code);
             if (is_oob) {
                 // Display code in HTML for OOB
-                const html = try std.fmt.allocPrint(self.allocator,
-                    "<!DOCTYPE html><html><head><title>Authorization Code</title></head><body><h1>Authorization Code</h1><p>Copy this code and paste it into your application:</p><pre style='font-size:1.5em;'>{s}</pre></body></html>",
-                        .{code});
+                const html = try std.fmt.allocPrint(self.allocator, "<!DOCTYPE html><html><head><title>Authorization Code</title></head><body><h1>Authorization Code</h1><p>Copy this code and paste it into your application:</p><pre style='font-size:1.5em;'>{s}</pre></body></html>", .{code});
                 defer self.allocator.free(html);
                 const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}", .{ html.len, html });
                 defer self.allocator.free(response);
@@ -643,9 +659,9 @@ pub const RouteHandler = struct {
                 return;
             } else {
                 // Redirect with code
-                var redirect_url = try std.fmt.allocPrint(self.allocator, "{s}?code={s}", .{redirect_uri, code});
+                var redirect_url = try std.fmt.allocPrint(self.allocator, "{s}?code={s}", .{ redirect_uri, code });
                 if (state) |s| {
-                    redirect_url = try std.fmt.allocPrint(self.allocator, "{s}&state={s}", .{redirect_url, s});
+                    redirect_url = try std.fmt.allocPrint(self.allocator, "{s}&state={s}", .{ redirect_url, s });
                 }
                 defer self.allocator.free(redirect_url);
                 const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\n\r\n", .{redirect_url});
@@ -657,28 +673,13 @@ pub const RouteHandler = struct {
             // Show consent form (existing logic)
             const state_input = if (state) |s| try std.fmt.allocPrint(self.allocator, "<input type=\"hidden\" name=\"state\" value=\"{s}\">", .{s}) else "";
             defer if (state_input.len > 0) self.allocator.free(state_input);
-            const html = try std.fmt.allocPrint(self.allocator,
-                "<!DOCTYPE html><html><head><title>Authorize {s}</title></head><body><h1>Authorize {s}</h1><p>The application '{s}' wants to access your Maigo account.</p><form method='post' action='/oauth/authorize'><input type='hidden' name='client_id' value='{s}'><input type='hidden' name='redirect_uri' value='{s}'><input type='hidden' name='response_type' value='{s}'>{s}<button type='submit' name='approve' value='true'>Approve</button><button type='submit' name='deny' value='true'>Deny</button></form></body></html>",
-                    .{client_data.name, client_data.name, client_data.name, client_id, redirect_uri, response_type, state_input});
+            const html = try std.fmt.allocPrint(self.allocator, "<!DOCTYPE html><html><head><title>Authorize {s}</title></head><body><h1>Authorize {s}</h1><p>The application '{s}' wants to access your Maigo account.</p><form method='post' action='/oauth/authorize'><input type='hidden' name='client_id' value='{s}'><input type='hidden' name='redirect_uri' value='{s}'><input type='hidden' name='response_type' value='{s}'>{s}<button type='submit' name='approve' value='true'>Approve</button><button type='submit' name='deny' value='true'>Deny</button></form></body></html>", .{ client_data.name, client_data.name, client_data.name, client_id, redirect_uri, response_type, state_input });
             defer self.allocator.free(html);
             const response = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {d}\r\n\r\n{s}", .{ html.len, html });
             defer self.allocator.free(response);
             try writer.writeAll(response);
         }
     }
-// Password hashing (same as CLI/TUI)
-fn hashPassword(allocator: std.mem.Allocator, password: []const u8) ![]u8 {
-    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    hasher.update("maigo_salt_");
-    hasher.update(password);
-    var hash_bytes: [32]u8 = undefined;
-    hasher.final(&hash_bytes);
-    var hex = try allocator.alloc(u8, 64);
-    for (hash_bytes, 0..) |byte, i| {
-        _ = std.fmt.formatIntBuf(hex[i*2..][0..2], byte, 16, .lower, .{});
-    }
-    return hex;
-}
 
     fn handleOAuthToken(self: *RouteHandler, writer: anytype, body: []const u8) !void {
         std.debug.print("OAuth token request body: {s}\n", .{body});
@@ -1003,4 +1004,152 @@ test "parse subdomain" {
     } else {
         try testing.expect(false);
     }
+}
+
+test "generateSessionId uniqueness and length" {
+    const allocator = testing.allocator;
+    const id1 = try generateSessionId(allocator);
+    defer allocator.free(id1);
+    const id2 = try generateSessionId(allocator);
+    defer allocator.free(id2);
+    try testing.expect(id1.len == 64);
+    try testing.expect(id2.len == 64);
+    try testing.expect(!std.mem.eql(u8, id1, id2));
+}
+
+test "setSession, getSession, clearSession" {
+    const session_id = "deadbeef";
+    setSession(session_id, 42);
+    try testing.expect(getSession(session_id) == 42);
+    clearSession(session_id);
+    try testing.expect(getSession(session_id) == null);
+}
+
+test "parseTargetUrl simple JSON" {
+    const allocator = testing.allocator;
+    const config = ServerConfig{ .base_domain = "maigo.dev", .db_path = ":memory:" };
+    var handler = try RouteHandler.init(allocator, config);
+    defer handler.deinit();
+    const body = "{\"url\":\"https://example.com\"}";
+    const url = handler.parseTargetUrl(body) orelse return error.TestFailed;
+    defer allocator.free(url);
+    try testing.expectEqualStrings("https://example.com", url);
+}
+
+test "parseFormValue basic" {
+    const allocator = testing.allocator;
+    const config = ServerConfig{ .base_domain = "maigo.dev", .db_path = ":memory:" };
+    var handler = try RouteHandler.init(allocator, config);
+    defer handler.deinit();
+    const body = "username=alice&password=secret";
+    const username = handler.parseFormValue(body, "username") orelse return error.TestFailed;
+    defer allocator.free(username);
+    try testing.expectEqualStrings("alice", username);
+    const password = handler.parseFormValue(body, "password") orelse return error.TestFailed;
+    defer allocator.free(password);
+    try testing.expectEqualStrings("secret", password);
+}
+
+test "parseQueryValue basic" {
+    const allocator = testing.allocator;
+    const config = ServerConfig{ .base_domain = "maigo.dev", .db_path = ":memory:" };
+    var handler = try RouteHandler.init(allocator, config);
+    defer handler.deinit();
+    const query = "client_id=cli-demo&redirect_uri=urn:ietf:wg:oauth:2.0:oob";
+    const client_id = handler.parseQueryValue(query, "client_id") orelse return error.TestFailed;
+    defer allocator.free(client_id);
+    try testing.expectEqualStrings("cli-demo", client_id);
+    const redirect_uri = handler.parseQueryValue(query, "redirect_uri") orelse return error.TestFailed;
+    defer allocator.free(redirect_uri);
+    try testing.expectEqualStrings("urn:ietf:wg:oauth:2.0:oob", redirect_uri);
+}
+
+test "hashPassword deterministic" {
+    const allocator = testing.allocator;
+    const hash1 = try hashPassword(allocator, "password123");
+    defer allocator.free(hash1);
+    const hash2 = try hashPassword(allocator, "password123");
+    defer allocator.free(hash2);
+    try testing.expectEqualStrings(hash1, hash2);
+    const hash3 = try hashPassword(allocator, "different");
+    defer allocator.free(hash3);
+    try testing.expect(!std.mem.eql(u8, hash1, hash3));
+}
+
+test "HttpRequest.parse basic GET" {
+    const allocator = testing.allocator;
+    const raw_request =
+        \\GET /path/to/resource HTTP/1.1
+        \\Host: example.com
+        \\User-Agent: test
+        \\
+        \\
+    ;
+
+    var request = try HttpRequest.parse(allocator, raw_request);
+    defer request.deinit(allocator);
+
+    try testing.expectEqualStrings("GET", request.method);
+    try testing.expectEqualStrings("/path/to/resource", request.path);
+    try testing.expectEqualStrings("example.com", request.host);
+    try testing.expect(request.authorization == null);
+    try testing.expectEqualStrings("", request.body);
+}
+
+test "HttpRequest.parse POST with body and auth" {
+    const allocator = testing.allocator;
+    const raw_request =
+        \\POST /api/data HTTP/1.1
+        \\Host: api.maigo.dev
+        \\Authorization: Bearer my-secret-token
+        \\Content-Type: application/json
+        \\
+        \\{"key":"value"}
+    ;
+
+    var request = try HttpRequest.parse(allocator, raw_request);
+    defer request.deinit(allocator);
+
+    try testing.expectEqualStrings("POST", request.method);
+    try testing.expectEqualStrings("/api/data", request.path);
+    try testing.expectEqualStrings("api.maigo.dev", request.host);
+    try testing.expect(request.authorization != null);
+    try testing.expectEqualStrings("Bearer my-secret-token", request.authorization.?);
+    try testing.expectEqualStrings("{\"key\":\"value\"}", request.body);
+}
+
+test "getSessionIdFromRequest" {
+    const request_with_session = HttpRequest{
+        .method = "GET",
+        .path = "/",
+        .host = "maigo.dev",
+        .body = "",
+        .authorization = null,
+        .cookie = "other_cookie=123; maigo_session=test-session-id; another=abc",
+    };
+    const session_id = getSessionIdFromRequest(request_with_session);
+    try testing.expect(session_id != null);
+    try testing.expectEqualStrings("test-session-id", session_id.?);
+
+    const request_no_session = HttpRequest{
+        .method = "GET",
+        .path = "/",
+        .host = "maigo.dev",
+        .body = "",
+        .authorization = null,
+        .cookie = "other_cookie=123; another=abc",
+    };
+    const no_session_id = getSessionIdFromRequest(request_no_session);
+    try testing.expect(no_session_id == null);
+
+    const request_no_cookie = HttpRequest{
+        .method = "GET",
+        .path = "/",
+        .host = "maigo.dev",
+        .body = "",
+        .authorization = null,
+        .cookie = null,
+    };
+    const no_cookie = getSessionIdFromRequest(request_no_cookie);
+    try testing.expect(no_cookie == null);
 }

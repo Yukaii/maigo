@@ -71,7 +71,7 @@ pub fn build(b: *std.Build) void {
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
     exe_mod.addImport("maigo_lib", lib_mod);
-    
+
     // Add pg module to both lib and exe modules
     lib_mod.addImport("pg", pg_dep.module("pg"));
     exe_mod.addImport("pg", pg_dep.module("pg"));
@@ -165,7 +165,6 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
-
 
     // PostgreSQL integration test
     const postgres_test = b.addExecutable(.{
