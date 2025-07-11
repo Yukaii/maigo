@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/yukaii/maigo/internal/config"
@@ -120,8 +123,12 @@ func NewSSHCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 				return fmt.Errorf("failed to generate host key: %w", err)
 			}
 			
-			// Start the server (this blocks until shutdown)
-			if err := sshServer.Start(); err != nil {
+			// Setup signal handling
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			
+			// Start the server (this blocks until shutdown signal)
+			if err := sshServer.Start(ctx); err != nil {
 				log.Error("SSH server failed", "error", err)
 				return fmt.Errorf("SSH server failed: %w", err)
 			}

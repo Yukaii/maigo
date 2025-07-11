@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"syscall"
 	"time"
 
@@ -39,8 +38,8 @@ func NewServer(cfg *config.Config, db *pgxpool.Pool, log *logger.Logger) *Server
 	}
 }
 
-// Start starts the SSH TUI server
-func (s *Server) Start() error {
+// Start starts the SSH TUI server with the provided context
+func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Starting SSH TUI server", "port", s.config.SSH.Port)
 
 	// Create SSH server with middleware
@@ -59,9 +58,6 @@ func (s *Server) Start() error {
 	s.sshServer = sshServer
 
 	// Start server in a goroutine
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
 	go func() {
 		if err := sshServer.ListenAndServe(); err != nil && err != ssh.ErrServerClosed {
 			s.logger.Error("SSH server error", "error", err)
@@ -70,14 +66,14 @@ func (s *Server) Start() error {
 
 	s.logger.Info("SSH TUI server started successfully")
 
-	// Wait for shutdown signal
-	<-done
+	// Wait for shutdown signal from context
+	<-ctx.Done()
 	s.logger.Info("SSH TUI server shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	return sshServer.Shutdown(ctx)
+	return sshServer.Shutdown(shutdownCtx)
 }
 
 // Stop gracefully stops the SSH server

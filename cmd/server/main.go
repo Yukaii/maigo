@@ -82,18 +82,23 @@ func main() {
 
 	log.Info("Maigo server started successfully")
 
+	// Setup signal context for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// Wait for interrupt signal to gracefully shutdown the server
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	<-ctx.Done()
+
+	// Stop listening for more signals to allow forced termination on subsequent Ctrl+C
+	stop()
 
 	log.Info("Shutting down server...")
 
 	// Give the server 30 seconds to finish processing requests
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("Server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
