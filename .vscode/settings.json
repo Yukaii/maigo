@@ -3,7 +3,8 @@
         "psql": true,
         "/zig build(.*)?/": true,
         "/zig test(.*)?/": true,
-        "/go mod(.*)?/": true
+        "/go mod(.*)?/": true,
+        "/go build(.*)?/": true
     },
     "zig.testArgs": [
         "build",
