@@ -1,0 +1,182 @@
+.PHONY: help setup build test lint fmt clean dev server ssh-server migrate-up migrate-down db-setup db-reset db-seed
+.DEFAULT_GOAL := help
+
+# Variables
+GO_VERSION := 1.21
+BINARY_NAME := maigo
+SERVER_BINARY := server
+MAIN_PACKAGE := ./cmd/$(BINARY_NAME)
+SERVER_PACKAGE := ./cmd/$(SERVER_BINARY)
+COVERAGE_FILE := coverage.out
+
+# Build info
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+
+# LDFLAGS for version info
+LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
+
+## help: Show this help message
+help:
+	@echo "Available commands:"
+	@sed -n 's/^##//p' $(MAKEFILE_LIST) | column -t -s ':' | sed -e 's/^/ /'
+
+## setup: Initialize development environment
+setup:
+	@echo "Setting up development environment..."
+	go version
+	go mod download
+	go mod tidy
+	cp .env.example .env
+	@echo "Installing development tools..."
+	go install github.com/air-verse/air@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	@echo "Setup complete! Edit .env file with your configuration."
+
+## build: Build all binaries
+build: clean
+	@echo "Building binaries..."
+	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(BINARY_NAME) $(MAIN_PACKAGE)
+	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(SERVER_BINARY) $(SERVER_PACKAGE)
+	@echo "Built: bin/$(BINARY_NAME), bin/$(SERVER_BINARY)"
+
+## dev: Start development server with hot reload
+dev:
+	@echo "Starting development server with hot reload..."
+	air
+
+## test: Run all tests
+test:
+	@echo "Running tests..."
+	go test -v -race -coverprofile=$(COVERAGE_FILE) ./...
+	go tool cover -html=$(COVERAGE_FILE) -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+## test-unit: Run unit tests only
+test-unit:
+	@echo "Running unit tests..."
+	go test -v -short ./...
+
+## test-integration: Run integration tests
+test-integration:
+	@echo "Running integration tests..."
+	go test -v -run Integration ./...
+
+## benchmark: Run benchmarks
+benchmark:
+	@echo "Running benchmarks..."
+	go test -bench=. -benchmem ./...
+
+## lint: Run linter
+lint:
+	@echo "Running linter..."
+	golangci-lint run
+
+## fmt: Format code
+fmt:
+	@echo "Formatting code..."
+	go fmt ./...
+	go mod tidy
+
+## clean: Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	rm -rf bin/
+	rm -rf dist/
+	rm -f $(COVERAGE_FILE) coverage.html
+	go clean -cache
+	go clean -testcache
+
+## server: Start HTTP server
+server: build
+	@echo "Starting HTTP server..."
+	./bin/$(SERVER_BINARY) server
+
+## ssh-server: Start SSH TUI server  
+ssh-server: build
+	@echo "Starting SSH TUI server..."
+	./bin/$(SERVER_BINARY) ssh
+
+## migrate-up: Apply database migrations
+migrate-up:
+	@echo "Applying database migrations..."
+	migrate -path internal/database/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@$$DB_HOST:$$DB_PORT/$$DB_NAME?sslmode=$$DB_SSL_MODE" up
+
+## migrate-down: Rollback database migrations
+migrate-down:
+	@echo "Rolling back database migrations..."
+	migrate -path internal/database/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@$$DB_HOST:$$DB_PORT/$$DB_NAME?sslmode=$$DB_SSL_MODE" down
+
+## migrate-create: Create new migration (usage: make migrate-create NAME=create_users)
+migrate-create:
+	@if [ -z "$(NAME)" ]; then echo "Usage: make migrate-create NAME=migration_name"; exit 1; fi
+	migrate create -ext sql -dir internal/database/migrations $(NAME)
+
+## db-setup: Initialize PostgreSQL database
+db-setup:
+	@echo "Setting up PostgreSQL database..."
+	createdb -h $$DB_HOST -p $$DB_PORT -U $$DB_USER $$DB_NAME || true
+	$(MAKE) migrate-up
+
+## db-reset: Reset database to clean state
+db-reset:
+	@echo "Resetting database..."
+	dropdb -h $$DB_HOST -p $$DB_PORT -U $$DB_USER $$DB_NAME || true
+	$(MAKE) db-setup
+
+## db-seed: Populate database with test data
+db-seed:
+	@echo "Seeding database with test data..."
+	go run scripts/seed.go
+
+## install-tools: Install development dependencies
+install-tools:
+	@echo "Installing development tools..."
+	go install github.com/air-verse/air@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	go install github.com/swaggo/swag/cmd/swag@latest
+
+## check: Run all quality checks
+check: fmt lint test
+
+## build-linux: Cross-compile for Linux
+build-linux: clean
+	@echo "Building for Linux..."
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 $(MAIN_PACKAGE)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-linux-amd64 $(SERVER_PACKAGE)
+
+## build-darwin: Cross-compile for macOS
+build-darwin: clean
+	@echo "Building for macOS..."
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 $(MAIN_PACKAGE)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-darwin-amd64 $(SERVER_PACKAGE)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 $(MAIN_PACKAGE)  
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-darwin-arm64 $(SERVER_PACKAGE)
+
+## build-windows: Cross-compile for Windows
+build-windows: clean
+	@echo "Building for Windows..."
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PACKAGE)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-windows-amd64.exe $(SERVER_PACKAGE)
+
+## release: Build release binaries for all platforms
+release: build-linux build-darwin build-windows
+	@echo "Release binaries built in dist/"
+
+## docker: Build Docker container
+docker:
+	@echo "Building Docker container..."
+	docker build -t maigo:$(VERSION) .
+
+## run-cli: Run CLI with arguments (usage: make run-cli ARGS="auth login")
+run-cli: build
+	./bin/$(BINARY_NAME) $(ARGS)
+
+## version: Show version information
+version:
+	@echo "Version: $(VERSION)"
+	@echo "Build Time: $(BUILD_TIME)"
+	@echo "Git Commit: $(GIT_COMMIT)"
