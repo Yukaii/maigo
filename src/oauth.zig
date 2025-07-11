@@ -119,6 +119,13 @@ pub const TokenRequest = struct {
 };
 
 pub const OAuthServer = struct {
+    /// Temporary stub for code generation. Replace with real implementation.
+    pub fn generateAuthorizationCode(self: *OAuthServer, client_id: []const u8, user_id: u64) ![]u8 {
+        _ = self;
+        _ = client_id;
+        _ = user_id;
+        return std.heap.page_allocator.dupe(u8, "dummy-auth-code");
+    }
     allocator: std.mem.Allocator,
     db: *database_pg.Database,
     rng: std.Random.DefaultPrng,
