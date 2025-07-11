@@ -12,10 +12,16 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/yukaii/maigo/internal/config"
 )
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
+
+// Connect creates a new database connection using config
+func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
+	return NewConnection(cfg.DatabaseURL())
+}
 
 // NewConnection creates a new database connection pool
 func NewConnection(databaseURL string) (*pgxpool.Pool, error) {

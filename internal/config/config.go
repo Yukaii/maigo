@@ -63,11 +63,14 @@ type JWTConfig struct {
 
 // AppConfig holds application-specific configuration
 type AppConfig struct {
-	BaseDomain      string        `mapstructure:"base_domain"`
-	ShortCodeLength int           `mapstructure:"short_code_length"`
+	Name            string          `mapstructure:"name"`
+	BaseDomain      string          `mapstructure:"base_domain"`
+	Domain          string          `mapstructure:"domain"`
+	TLS             bool            `mapstructure:"tls"`
+	ShortCodeLength int             `mapstructure:"short_code_length"`
 	RateLimit       RateLimitConfig `mapstructure:"rate_limit"`
-	Debug           bool          `mapstructure:"debug"`
-	CORSEnabled     bool          `mapstructure:"cors_enabled"`
+	Debug           bool            `mapstructure:"debug"`
+	CORSEnabled     bool            `mapstructure:"cors_enabled"`
 }
 
 // RateLimitConfig holds rate limiting configuration
@@ -158,7 +161,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("jwt.expiration", "24h")
 
 	// App defaults
+	v.SetDefault("app.name", "Maigo")
 	v.SetDefault("app.base_domain", "maigo.dev")
+	v.SetDefault("app.domain", "maigo.dev")
+	v.SetDefault("app.tls", false)
 	v.SetDefault("app.short_code_length", 6)
 	v.SetDefault("app.rate_limit.requests", 100)
 	v.SetDefault("app.rate_limit.window", "1h")

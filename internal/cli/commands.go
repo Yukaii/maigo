@@ -5,7 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yukaii/maigo/internal/config"
+	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/ssh"
 )
 
 // NewServerCommand creates the server command
@@ -100,9 +102,30 @@ func NewSSHCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 		Short: "SSH server operations",
 		Long:  "Start and manage the SSH terminal interface",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO: Start SSH server with Bubble Tea TUI
-			log.Info("Starting SSH server", "address", cfg.SSHAddr())
-			fmt.Println("SSH server not yet implemented")
+			log.Info("Starting SSH TUI server", "address", cfg.SSHAddr())
+			
+			// Initialize database connection
+			db, err := database.Connect(cfg)
+			if err != nil {
+				return fmt.Errorf("failed to connect to database: %w", err)
+			}
+			defer db.Close()
+			
+			// Create and start SSH server
+			sshServer := ssh.NewServer(cfg, db, log)
+			
+			// Generate host key if needed
+			if err := sshServer.GenerateHostKey(); err != nil {
+				log.Error("Failed to generate host key", "error", err)
+				return fmt.Errorf("failed to generate host key: %w", err)
+			}
+			
+			// Start the server (this blocks until shutdown)
+			if err := sshServer.Start(); err != nil {
+				log.Error("SSH server failed", "error", err)
+				return fmt.Errorf("SSH server failed: %w", err)
+			}
+			
 			return nil
 		},
 	}

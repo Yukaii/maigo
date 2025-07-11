@@ -82,6 +82,7 @@ func (s *HTTPServer) setupRoutes() {
 		// Authentication endpoints
 		auth := v1.Group("/auth")
 		{
+			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/token", authHandler.RefreshToken)
 			auth.POST("/logout", middleware.Auth(s.config), authHandler.Logout)
