@@ -1,6 +1,8 @@
 package server
 
 import (
+	"embed"
+	"html/template"
 	"net/http"
 
 	"github.com/gin-contrib/cors"
@@ -11,6 +13,9 @@ import (
 	"github.com/yukaii/maigo/internal/server/handlers"
 	"github.com/yukaii/maigo/internal/server/middleware"
 )
+
+//go:embed templates/*
+var templatesFS embed.FS
 
 // HTTPServer wraps Gin engine with our configuration
 type HTTPServer struct {
@@ -25,8 +30,12 @@ func NewHTTPServer(cfg *config.Config, db *pgxpool.Pool, log *logger.Logger) *HT
 	// Create Gin engine
 	engine := gin.New()
 
-	// Load HTML templates
-	engine.LoadHTMLGlob("templates/**/*")
+	// Load HTML templates from embedded filesystem
+	templ := template.Must(template.New("").ParseFS(templatesFS, 
+		"templates/layouts/*.tmpl",
+		"templates/styles/*.css", 
+		"templates/oauth/*.tmpl"))
+	engine.SetHTMLTemplate(templ)
 
 	// Add custom middleware
 	engine.Use(middleware.Logger(log))
