@@ -78,5 +78,3 @@ tmp_keys/
 # Migration files (temporary)
 *.sql.bak
 
-# Development tools
-.air.toml
