@@ -1,7 +1,7 @@
 # Maigo - Terminal-First URL Shortener
 
 ### ✅ Implementation Status - OAUTH 2.0 COMPLETE! (2025-07-12)
-- **[x] ✅ Go project structure** with modern conventions (cmd/, internal/, pkg/, configs/)
+**[x] ✅ Go project structure** with modern conventions (cmd/, internal/, pkg/, config/)
 - **[x] ✅ Cobra CLI implementation** with imperative, easy-to-use commands
 - **[x] ✅ Gin HTTP server** with middleware stack and OAuth 2.0 endpoints
 - **[x] ✅ Development environment** with Air hot reload and comprehensive Makefile
@@ -128,8 +128,9 @@ maigo/
 │   ├── oauth/                   # OAuth2 server
 │   ├── shortener/               # URL shortening logic
 │   └── config/                  # Configuration
-├── configs/
-│   └── config.yaml              # Application configuration
+├── config/
+│   ├── config.yaml              # Application configuration
+│   └── test.yaml                # Test configuration
 ├── tests/
 │   └── integration/             # Integration tests
 ├── go.mod                       # Go dependencies
