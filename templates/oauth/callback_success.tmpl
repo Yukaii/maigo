@@ -1,0 +1,124 @@
+{{define "oauth/callback_success.tmpl"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Maigo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        .auth-box { 
+            border: 1px solid #ddd; 
+            padding: 40px; 
+            border-radius: 12px; 
+            background: #ffffff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .check-icon {
+            color: #28a745;
+        }
+        h2 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #155724;
+        }
+        .instruction {
+            margin: 30px 0;
+            color: #6c757d;
+            font-size: 16px;
+        }
+        .auto-close {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 8px;
+            color: #495057;
+            font-size: 14px;
+        }
+        .countdown {
+            font-weight: 600;
+            color: #007bff;
+        }
+        @media (max-width: 600px) {
+            body {
+                margin: 20px auto;
+                padding: 15px;
+            }
+            .auth-box {
+                padding: 25px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-box">
+        <div class="header">
+            <div class="header-icon check-icon">✅</div>
+            <h2>Authorization Successful</h2>
+        </div>
+
+        <div class="success-message">
+            <strong>Great!</strong> You have successfully authorized the Maigo CLI application.
+        </div>
+
+        <div class="instruction">
+            You can now return to your terminal to continue using the Maigo CLI.
+        </div>
+
+        <div class="auto-close">
+            This window will automatically close in <span class="countdown" id="countdown">3</span> seconds.
+        </div>
+    </div>
+
+    <script>
+        let seconds = 3;
+        const countdownElement = document.getElementById('countdown');
+        
+        const timer = setInterval(function() {
+            seconds--;
+            countdownElement.textContent = seconds;
+            
+            if (seconds <= 0) {
+                clearInterval(timer);
+                window.close();
+            }
+        }, 1000);
+        
+        // Also allow manual close
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' || e.key === 'Enter') {
+                window.close();
+            }
+        });
+    </script>
+</body>
+</html>
+{{end}}

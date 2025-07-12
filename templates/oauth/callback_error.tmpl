@@ -1,0 +1,115 @@
+{{define "oauth/callback_error.tmpl"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Maigo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        .auth-box { 
+            border: 1px solid #ddd; 
+            padding: 40px; 
+            border-radius: 12px; 
+            background: #ffffff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .error-icon {
+            color: #dc3545;
+        }
+        h2 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .error-details {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .error-label {
+            font-weight: 600;
+            color: #721c24;
+            margin-bottom: 8px;
+        }
+        .error-value {
+            color: #721c24;
+            font-family: monospace;
+            background: rgba(255,255,255,0.7);
+            padding: 8px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        .instruction {
+            margin: 30px 0;
+            color: #6c757d;
+            font-size: 16px;
+        }
+        .close-instruction {
+            margin-top: 30px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 8px;
+            color: #495057;
+            font-size: 14px;
+        }
+        @media (max-width: 600px) {
+            body {
+                margin: 20px auto;
+                padding: 15px;
+            }
+            .auth-box {
+                padding: 25px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-box">
+        <div class="header">
+            <div class="header-icon error-icon">❌</div>
+            <h2>Authorization Failed</h2>
+        </div>
+
+        <div class="error-details">
+            <div class="error-label">Error Code:</div>
+            <div class="error-value">{{.ErrorCode}}</div>
+            
+            <div class="error-label" style="margin-top: 15px;">Description:</div>
+            <div class="error-value">{{.ErrorDescription}}</div>
+        </div>
+
+        <div class="instruction">
+            The OAuth authorization process could not be completed successfully.
+        </div>
+
+        <div class="close-instruction">
+            You can close this window and try the authorization process again from your terminal.
+        </div>
+    </div>
+</body>
+</html>
+{{end}}

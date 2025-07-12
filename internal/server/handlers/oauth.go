@@ -1,10 +1,9 @@
 package handlers
 
 import (
-	"fmt"
-	"html"
-	"net/http"
-	"strconv"
+	   "fmt"
+	   "net/http"
+	   "strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -13,6 +12,45 @@ import (
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/oauth"
 )
+
+// Template data structures for OAuth pages
+type OAuthLoginData struct {
+	Title               string
+	ClientID            string
+	RedirectURI         string
+	Scope               string
+	PkceInfo            string
+	ResponseType        string
+	ScopeValue          string
+	State               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	ErrorMessage        string
+}
+
+type OAuthAuthorizeData struct {
+	Title               string
+	ClientID            string
+	RedirectURI         string
+	Scope               string
+	PkceInfo            string
+	ResponseType        string
+	ScopeValue          string
+	State               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	UserID              string
+}
+
+type CallbackSuccessData struct {
+	Title string
+}
+
+type CallbackErrorData struct {
+	Title            string
+	ErrorCode        string
+	ErrorDescription string
+}
 
 // OAuthHandler handles OAuth 2.0 operations
 type OAuthHandler struct {
@@ -169,799 +207,58 @@ func (h *OAuthHandler) getCurrentUserID(c *gin.Context) int64 {
 
 // renderLoginPage renders the OAuth login and authorization page
 func (h *OAuthHandler) renderLoginPage(c *gin.Context, req *oauth.AuthorizationRequest) {
-	// Escape all dynamic content for HTML context
-	clientID := html.EscapeString(req.ClientID)
-	redirectURI := html.EscapeString(req.RedirectURI)
-	scope := html.EscapeString(h.formatScope(req.Scope))
-	pkceInfo := html.EscapeString(h.formatPKCE(req.CodeChallenge, req.CodeChallengeMethod))
-	responseType := html.EscapeString(req.ResponseType)
-	scopeValue := html.EscapeString(req.Scope)
-	state := html.EscapeString(req.State)
-	codeChallenge := html.EscapeString(req.CodeChallenge)
-	codeChallengeMethod := html.EscapeString(req.CodeChallengeMethod)
-	
-	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maigo OAuth Authorization</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
-        }
-        .auth-box { 
-            border: 1px solid #ddd; 
-            padding: 40px; 
-            border-radius: 12px; 
-            background: #ffffff;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .lock-icon {
-            font-size: 48px;
-            color: #007bff;
-            margin-bottom: 10px;
-        }
-        h2 {
-            margin: 0;
-            color: #2c3e50;
-            font-size: 24px;
-            font-weight: 600;
-        }
-        .btn { 
-            background: #007bff; 
-            color: white; 
-            padding: 12px 24px; 
-            border: none; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            text-decoration: none; 
-            display: inline-block;
-            font-size: 16px;
-            font-weight: 500;
-            margin: 0 8px 8px 0;
-            transition: background-color 0.2s ease;
-            width: 100%%;
-        }
-        .btn:hover { 
-            background: #0056b3; 
-        }
-        .client-info { 
-            background: #e8f4fd; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin: 25px 0;
-            border-left: 4px solid #007bff;
-        }
-        .client-info h3 {
-            margin-top: 0;
-            color: #1e3a8a;
-            font-size: 18px;
-        }
-        .info-row {
-            margin: 12px 0;
-            display: flex;
-            flex-wrap: wrap;
-        }
-        .info-label {
-            font-weight: 600;
-            margin-right: 8px;
-            min-width: 100px;
-            color: #374151;
-        }
-        .info-value {
-            color: #1f2937;
-            word-break: break-all;
-        }
-        .login-form {
-            margin: 30px 0;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 600;
-            color: #374151;
-        }
-        .form-input {
-            width: 100%%;
-            padding: 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 16px;
-            transition: border-color 0.2s ease;
-        }
-        .form-input:focus {
-            outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
-        }
-        .button-container {
-            text-align: center;
-            margin-top: 30px;
-        }
-        .error-message {
-            background: #fee;
-            border: 1px solid #fcc;
-            border-radius: 6px;
-            padding: 12px;
-            margin: 15px 0;
-            color: #c53030;
-            font-size: 14px;
-        }
-        .step-indicator {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #28a745;
-        }
-        .step-indicator h4 {
-            margin: 0 0 10px 0;
-            color: #28a745;
-            font-size: 16px;
-        }
-        @media (max-width: 600px) {
-            body {
-                margin: 20px auto;
-                padding: 15px;
-            }
-            .auth-box {
-                padding: 25px;
-            }
-            .btn {
-                display: block;
-                width: 100%%;
-                margin-bottom: 12px;
-                margin-right: 0;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="auth-box">
-        <div class="header">
-            <div class="lock-icon">🔒</div>
-            <h2>Maigo OAuth Authorization</h2>
-        </div>
-        
-        <div class="client-info">
-            <h3>Application Requesting Access</h3>
-            <div class="info-row">
-                <span class="info-label">Client ID:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Redirect URI:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Scope:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Security:</span>
-                <span class="info-value">%s</span>
-            </div>
-        </div>
+	data := OAuthLoginData{
+		Title:               "OAuth Authorization",
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               h.formatScope(req.Scope),
+		PkceInfo:            h.formatPKCE(req.CodeChallenge, req.CodeChallengeMethod),
+		ResponseType:        req.ResponseType,
+		ScopeValue:          req.Scope,
+		State:               req.State,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		ErrorMessage:        "",
+	}
 
-        <div class="step-indicator">
-            <h4>📝 Step 1: Login Required</h4>
-            <p>Please log in to authorize this application to access your Maigo account.</p>
-        </div>
-        
-        <div class="login-form">
-            <form method="post" action="/oauth/authorize">
-                <input type="hidden" name="response_type" value="%s">
-                <input type="hidden" name="client_id" value="%s">
-                <input type="hidden" name="redirect_uri" value="%s">
-                <input type="hidden" name="scope" value="%s">
-                <input type="hidden" name="state" value="%s">
-                <input type="hidden" name="code_challenge" value="%s">
-                <input type="hidden" name="code_challenge_method" value="%s">
-                <input type="hidden" name="action" value="login">
-                
-                <div class="form-group">
-                    <label for="username" class="form-label">Username or Email</label>
-                    <input type="text" id="username" name="username" class="form-input" 
-                           placeholder="Enter your username or email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="password" class="form-label">Password</label>
-                    <input type="password" id="password" name="password" class="form-input" 
-                           placeholder="Enter your password" required>
-                </div>
-                
-                <div class="button-container">
-                    <button type="submit" class="btn">
-                        🔐 Login & Continue
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</body>
-</html>`,
-		clientID,
-		redirectURI,
-		scope,
-		pkceInfo,
-		responseType,
-		clientID,
-		redirectURI,
-		scopeValue,
-		state,
-		codeChallenge,
-		codeChallengeMethod,
-	)
-	
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, htmlContent)
+	c.HTML(http.StatusOK, "oauth/login.tmpl", data)
 }
 
 // renderLoginPageWithError renders the login page with an error message
 func (h *OAuthHandler) renderLoginPageWithError(c *gin.Context, req *oauth.AuthorizationRequest, errorMsg string) {
-	// Escape all dynamic content for HTML context
-	clientID := html.EscapeString(req.ClientID)
-	redirectURI := html.EscapeString(req.RedirectURI)
-	scope := html.EscapeString(h.formatScope(req.Scope))
-	pkceInfo := html.EscapeString(h.formatPKCE(req.CodeChallenge, req.CodeChallengeMethod))
-	responseType := html.EscapeString(req.ResponseType)
-	scopeValue := html.EscapeString(req.Scope)
-	state := html.EscapeString(req.State)
-	codeChallenge := html.EscapeString(req.CodeChallenge)
-	codeChallengeMethod := html.EscapeString(req.CodeChallengeMethod)
-	_ = html.EscapeString(errorMsg) // Silence unused variable warning
-	
-	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maigo OAuth Authorization</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
-        }
-        .auth-box { 
-            border: 1px solid #ddd; 
-            padding: 40px; 
-            border-radius: 12px; 
-            background: #ffffff;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .lock-icon {
-            font-size: 48px;
-            color: #007bff;
-            margin-bottom: 10px;
-        }
-        h2 {
-            margin: 0;
-            color: #2c3e50;
-            font-size: 24px;
-            font-weight: 600;
-        }
-        .btn { 
-            background: #007bff; 
-            color: white; 
-            padding: 12px 24px; 
-            border: none; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            text-decoration: none; 
-            display: inline-block;
-            font-size: 16px;
-            font-weight: 500;
-            margin: 0 8px 8px 0;
-            transition: background-color 0.2s ease;
-            width: 100%%;
-        }
-        .btn:hover { 
-            background: #0056b3; 
-        }
-        .client-info { 
-            background: #e8f4fd; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin: 25px 0;
-            border-left: 4px solid #007bff;
-        }
-        .client-info h3 {
-            margin-top: 0;
-            color: #1e3a8a;
-            font-size: 18px;
-        }
-        .info-row {
-            margin: 12px 0;
-            display: flex;
-            flex-wrap: wrap;
-        }
-        .info-label {
-            font-weight: 600;
-            margin-right: 8px;
-            min-width: 100px;
-            color: #374151;
-        }
-        .info-value {
-            color: #1f2937;
-            word-break: break-all;
-        }
-        .login-form {
-            margin: 30px 0;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 600;
-            color: #374151;
-        }
-        .form-input {
-            width: 100%%;
-            padding: 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 16px;
-            transition: border-color 0.2s ease;
-        }
-        .form-input:focus {
-            outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
-        }
-        .button-container {
-            text-align: center;
-            margin-top: 30px;
-        }
-        .error-message {
-            background: #fee;
-            border: 1px solid #fcc;
-            border-radius: 6px;
-            padding: 12px;
-            margin: 15px 0;
-            color: #c53030;
-            font-size: 14px;
-        }
-        .step-indicator {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #28a745;
-        }
-        .step-indicator h4 {
-            margin: 0 0 10px 0;
-            color: #28a745;
-            font-size: 16px;
-        }
-        @media (max-width: 600px) {
-            body {
-                margin: 20px auto;
-                padding: 15px;
-            }
-            .auth-box {
-                padding: 25px;
-            }
-            .btn {
-                display: block;
-                width: 100%%;
-                margin-bottom: 12px;
-                margin-right: 0;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="auth-box">
-        <div class="header">
-            <div class="lock-icon">🔒</div>
-            <h2>Maigo OAuth Authorization</h2>
-        </div>
-        
-        <div class="client-info">
-            <h3>Application Requesting Access</h3>
-            <div class="info-row">
-                <span class="info-label">Client ID:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Redirect URI:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Scope:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Security:</span>
-                <span class="info-value">%s</span>
-            </div>
-        </div>
+	data := OAuthLoginData{
+		Title:               "OAuth Authorization",
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               h.formatScope(req.Scope),
+		PkceInfo:            h.formatPKCE(req.CodeChallenge, req.CodeChallengeMethod),
+		ResponseType:        req.ResponseType,
+		ScopeValue:          req.Scope,
+		State:               req.State,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		ErrorMessage:        errorMsg,
+	}
 
-        <div class="step-indicator">
-            <h4>📝 Step 1: Login Required</h4>
-            <p>Please log in to authorize this application to access your Maigo account.</p>
-        </div>
-        
-        <div class="login-form">
-            <form method="post" action="/oauth/authorize">
-                <input type="hidden" name="response_type" value="%s">
-                <input type="hidden" name="client_id" value="%s">
-                <input type="hidden" name="redirect_uri" value="%s">
-                <input type="hidden" name="scope" value="%s">
-                <input type="hidden" name="state" value="%s">
-                <input type="hidden" name="code_challenge" value="%s">
-                <input type="hidden" name="code_challenge_method" value="%s">
-                <input type="hidden" name="action" value="login">
-                
-                <div class="form-group">
-                    <label for="username" class="form-label">Username or Email</label>
-                    <input type="text" id="username" name="username" class="form-input" 
-                           placeholder="Enter your username or email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="password" class="form-label">Password</label>
-                    <input type="password" id="password" name="password" class="form-input" 
-                           placeholder="Enter your password" required>
-                </div>
-                
-                <div class="button-container">
-                    <button type="submit" class="btn">
-                        🔐 Login & Continue
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</body>
-</html>`,
-		clientID,
-		redirectURI,
-		scope,
-		pkceInfo,
-		responseType,
-		clientID,
-		redirectURI,
-		scopeValue,
-		state,
-		codeChallenge,
-		codeChallengeMethod,
-	)
-	
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, htmlContent)
+	c.HTML(http.StatusOK, "oauth/login.tmpl", data)
 }
-
-
 
 // renderAuthorizationPage renders the authorization consent page after login
 func (h *OAuthHandler) renderAuthorizationPage(c *gin.Context, req *oauth.AuthorizationRequest, userID int64) {
-	// Escape all dynamic content for HTML context
-	clientID := html.EscapeString(req.ClientID)
-	redirectURI := html.EscapeString(req.RedirectURI)
-	scope := html.EscapeString(h.formatScope(req.Scope))
-	pkceInfo := html.EscapeString(h.formatPKCE(req.CodeChallenge, req.CodeChallengeMethod))
-	responseType := html.EscapeString(req.ResponseType)
-	scopeValue := html.EscapeString(req.Scope)
-	state := html.EscapeString(req.State)
-	codeChallenge := html.EscapeString(req.CodeChallenge)
-	codeChallengeMethod := html.EscapeString(req.CodeChallengeMethod)
-	userIDStr := fmt.Sprintf("%d", userID)
-	
-	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maigo OAuth Authorization</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            max-width: 600px; 
-            margin: 50px auto; 
-            padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
-        }
-        .auth-box { 
-            border: 1px solid #ddd; 
-            padding: 40px; 
-            border-radius: 12px; 
-            background: #ffffff;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .check-icon {
-            font-size: 48px;
-            color: #28a745;
-            margin-bottom: 10px;
-        }
-        h2 {
-            margin: 0;
-            color: #2c3e50;
-            font-size: 24px;
-            font-weight: 600;
-        }
-        .btn { 
-            color: white; 
-            padding: 12px 24px; 
-            border: none; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            text-decoration: none; 
-            display: inline-block;
-            font-size: 16px;
-            font-weight: 500;
-            margin: 0 8px 8px 0;
-            transition: background-color 0.2s ease;
-        }
-        .btn-primary {
-            background: #28a745;
-        }
-        .btn-primary:hover { 
-            background: #218838; 
-        }
-        .btn-secondary {
-            background: #6c757d;
-        }
-        .btn-secondary:hover { 
-            background: #5a6268; 
-        }
-        .client-info { 
-            background: #e8f4fd; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin: 25px 0;
-            border-left: 4px solid #007bff;
-        }
-        .client-info h3 {
-            margin-top: 0;
-            color: #1e3a8a;
-            font-size: 18px;
-        }
-        .info-row {
-            margin: 12px 0;
-            display: flex;
-            flex-wrap: wrap;
-        }
-        .info-label {
-            font-weight: 600;
-            margin-right: 8px;
-            min-width: 100px;
-            color: #374151;
-        }
-        .info-value {
-            color: #1f2937;
-            word-break: break-all;
-        }
-        .permissions {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 25px 0;
-            border-left: 4px solid #28a745;
-        }
-        .permissions h3 {
-            margin-top: 0;
-            color: #155724;
-            font-size: 18px;
-        }
-        .permission-item {
-            display: flex;
-            align-items: center;
-            margin: 12px 0;
-            padding: 8px;
-            background: white;
-            border-radius: 6px;
-            border: 1px solid #e9ecef;
-        }
-        .permission-icon {
-            font-size: 20px;
-            margin-right: 10px;
-            color: #28a745;
-        }
-        .button-container {
-            text-align: center;
-            margin-top: 30px;
-        }
-        .success-indicator {
-            background: #d4edda;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #28a745;
-        }
-        .success-indicator h4 {
-            margin: 0 0 10px 0;
-            color: #155724;
-            font-size: 16px;
-        }
-        .warning-box {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 6px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #856404;
-        }
-        .warning-box h4 {
-            margin: 0 0 10px 0;
-            color: #856404;
-        }
-        @media (max-width: 600px) {
-            body {
-                margin: 20px auto;
-                padding: 15px;
-            }
-            .auth-box {
-                padding: 25px;
-            }
-            .btn {
-                display: block;
-                width: 100%%;
-                margin-bottom: 12px;
-                margin-right: 0;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="auth-box">
-        <div class="header">
-            <div class="check-icon">✅</div>
-            <h2>Authorization Required</h2>
-        </div>
-        
-        <div class="success-indicator">
-            <h4>🔐 Login Successful</h4>
-            <p>You have successfully authenticated. Please review the permissions below.</p>
-        </div>
-        
-        <div class="client-info">
-            <h3>Application Requesting Access</h3>
-            <div class="info-row">
-                <span class="info-label">Client ID:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Redirect URI:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Scope:</span>
-                <span class="info-value">%s</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Security:</span>
-                <span class="info-value">%s</span>
-            </div>
-        </div>
-
-        <div class="permissions">
-            <h3>🔐 Requested Permissions</h3>
-            <div class="permission-item">
-                <span class="permission-icon">🔗</span>
-                <div>
-                    <strong>Access your shortened URLs</strong><br>
-                    <small>View and manage your URL collection</small>
-                </div>
-            </div>
-            <div class="permission-item">
-                <span class="permission-icon">📊</span>
-                <div>
-                    <strong>View usage statistics</strong><br>
-                    <small>Access analytics for your shortened URLs</small>
-                </div>
-            </div>
-            <div class="permission-item">
-                <span class="permission-icon">👤</span>
-                <div>
-                    <strong>Access your profile information</strong><br>
-                    <small>Read your basic profile details</small>
-                </div>
-            </div>
-        </div>
-        
-        <div class="warning-box">
-            <h4>⚠️ Security Notice</h4>
-            <p>Only authorize applications that you trust. This will give the application access to your Maigo account as described above.</p>
-        </div>
-        
-        <div class="button-container">
-            <form method="post" action="/oauth/authorize" style="display: inline;">
-                <input type="hidden" name="response_type" value="%s">
-                <input type="hidden" name="client_id" value="%s">
-                <input type="hidden" name="redirect_uri" value="%s">
-                <input type="hidden" name="scope" value="%s">
-                <input type="hidden" name="state" value="%s">
-                <input type="hidden" name="code_challenge" value="%s">
-                <input type="hidden" name="code_challenge_method" value="%s">
-                <input type="hidden" name="user_id" value="%s">
-                <input type="hidden" name="action" value="authorize">
-                <button type="submit" class="btn btn-primary">
-                    ✅ Authorize Application
-                </button>
-            </form>
-            
-            <form method="post" action="/oauth/authorize" style="display: inline;">
-                <input type="hidden" name="response_type" value="%s">
-                <input type="hidden" name="client_id" value="%s">
-                <input type="hidden" name="redirect_uri" value="%s">
-                <input type="hidden" name="scope" value="%s">
-                <input type="hidden" name="state" value="%s">
-                <input type="hidden" name="code_challenge" value="%s">
-                <input type="hidden" name="code_challenge_method" value="%s">
-                <input type="hidden" name="action" value="deny">
-                <button type="submit" class="btn btn-secondary">
-                    ❌ Deny Access
-                </button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>`,
-		clientID,
-		redirectURI,
-		scope,
-		pkceInfo,
-		responseType,
-		clientID,
-		redirectURI,
-		scopeValue,
-		state,
-		codeChallenge,
-		codeChallengeMethod,
-		userIDStr,
-		responseType,
-		clientID,
-		redirectURI,
-		scopeValue,
-		state,
-		codeChallenge,
-		codeChallengeMethod,
-	)
-	
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, htmlContent)
+	data := OAuthAuthorizeData{
+		Title:               "OAuth Authorization",
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               h.formatScope(req.Scope),
+		PkceInfo:            h.formatPKCE(req.CodeChallenge, req.CodeChallengeMethod),
+		ResponseType:        req.ResponseType,
+		ScopeValue:          req.Scope,
+		State:               req.State,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		UserID:              fmt.Sprintf("%d", userID),
+	}
+	c.HTML(http.StatusOK, "oauth/authorize.tmpl", data)
 }
 
 // extractUserIDFromToken extracts user ID from an access token

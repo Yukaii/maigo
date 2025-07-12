@@ -25,6 +25,9 @@ func NewHTTPServer(cfg *config.Config, db *pgxpool.Pool, log *logger.Logger) *HT
 	// Create Gin engine
 	engine := gin.New()
 
+	// Load HTML templates
+	engine.LoadHTMLGlob("templates/**/*")
+
 	// Add custom middleware
 	engine.Use(middleware.Logger(log))
 	engine.Use(middleware.Recovery(log))
