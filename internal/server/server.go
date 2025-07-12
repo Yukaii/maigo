@@ -63,10 +63,20 @@ func (s *HTTPServer) setupRoutes() {
 	healthHandler := handlers.NewHealthHandler(s.db, s.logger)
 	urlHandler := handlers.NewURLHandler(s.db, s.config, s.logger)
 	authHandler := handlers.NewAuthHandler(s.db, s.config, s.logger)
+	oauthHandler := handlers.NewOAuthHandler(s.db, s.config, s.logger)
 
 	// Health check endpoint
 	s.engine.GET("/health", healthHandler.HealthCheck)
 	s.engine.GET("/health/ready", healthHandler.ReadinessCheck)
+
+	// OAuth 2.0 endpoints
+	oauth := s.engine.Group("/oauth")
+	{
+		oauth.GET("/authorize", oauthHandler.AuthorizeEndpoint)
+		oauth.POST("/authorize", oauthHandler.AuthorizePostEndpoint)
+		oauth.POST("/token", oauthHandler.TokenEndpoint)
+		oauth.POST("/revoke", oauthHandler.RevokeEndpoint)
+	}
 
 	// API v1 routes
 	v1 := s.engine.Group("/api/v1")
@@ -80,7 +90,7 @@ func (s *HTTPServer) setupRoutes() {
 			urls.DELETE("/:code", middleware.Auth(s.config), urlHandler.DeleteURL)
 		}
 
-		// Authentication endpoints
+		// Authentication endpoints (legacy - keeping for backward compatibility)
 		auth := v1.Group("/auth")
 		{
 			auth.POST("/register", authHandler.Register)

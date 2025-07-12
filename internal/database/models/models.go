@@ -34,13 +34,16 @@ type OAuthClient struct {
 
 // AuthorizationCode represents an OAuth2 authorization code
 type AuthorizationCode struct {
-	Code        string    `json:"code" db:"code" validate:"required"`
-	ClientID    string    `json:"client_id" db:"client_id" validate:"required"`
-	UserID      int64     `json:"user_id" db:"user_id" validate:"required"`
-	RedirectURI string    `json:"redirect_uri" db:"redirect_uri" validate:"required,url"`
-	ExpiresAt   time.Time `json:"expires_at" db:"expires_at"`
-	Used        bool      `json:"used" db:"used"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	Code                string    `json:"code" db:"code" validate:"required"`
+	ClientID            string    `json:"client_id" db:"client_id" validate:"required"`
+	UserID              int64     `json:"user_id" db:"user_id" validate:"required"`
+	RedirectURI         string    `json:"redirect_uri" db:"redirect_uri" validate:"required,url"`
+	Scope               string    `json:"scope" db:"scope"`
+	CodeChallenge       string    `json:"code_challenge,omitempty" db:"code_challenge"`
+	CodeChallengeMethod string    `json:"code_challenge_method,omitempty" db:"code_challenge_method"`
+	ExpiresAt           time.Time `json:"expires_at" db:"expires_at"`
+	Used                bool      `json:"used" db:"used"`
+	CreatedAt           time.Time `json:"created_at" db:"created_at"`
 }
 
 // AccessToken represents an OAuth2 access token

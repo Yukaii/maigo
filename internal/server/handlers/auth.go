@@ -25,7 +25,7 @@ func NewAuthHandler(db *pgxpool.Pool, cfg *config.Config, log *logger.Logger) *A
 		db:          db,
 		config:      cfg,
 		logger:      log,
-		oauthServer: oauth.NewServer(db, cfg),
+		oauthServer: oauth.NewServer(db, cfg, log.Logger),
 	}
 }
 

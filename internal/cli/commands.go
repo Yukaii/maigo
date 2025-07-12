@@ -4,17 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
-	"github.com/yukaii/maigo/internal/database/models"
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/server"
 )
@@ -338,7 +335,7 @@ func showMigrationStatus(cfg *config.Config, log *logger.Logger) error {
 	return nil
 }
 
-// runLogin handles user login
+// runLogin handles user login using OAuth 2.0 flow
 func runLogin(cfg *config.Config, log *logger.Logger, username string) error {
 	client := NewAPIClient(cfg)
 	
@@ -350,85 +347,67 @@ func runLogin(cfg *config.Config, log *logger.Logger, username string) error {
 		return nil
 	}
 
-	// Get password from user
-	fmt.Print("Password: ")
-	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	// Create OAuth client
+	oauthClient := NewOAuthClient(cfg, log)
+	
+	// Perform OAuth 2.0 flow
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	
+	fmt.Printf("🔐 Starting OAuth 2.0 authentication for user: %s\n", username)
+	
+	tokenResponse, err := oauthClient.PerformOAuthFlow(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
-	}
-	password := string(passwordBytes)
-	fmt.Println() // New line after password input
-
-	// Authenticate
-	log.Info("Attempting to login", "username", username)
-	response, err := client.Login(username, password)
-	if err != nil {
-		log.Error("Login failed", "username", username, "error", err)
-		return fmt.Errorf("login failed: %w", err)
+		log.Error("OAuth flow failed", "username", username, "error", err)
+		return fmt.Errorf("OAuth authentication failed: %w", err)
 	}
 
 	// Save tokens
-	if err := client.SaveTokens(response); err != nil {
+	if err := client.SaveTokens(tokenResponse); err != nil {
 		log.Error("Failed to save tokens", "error", err)
 		return fmt.Errorf("failed to save authentication tokens: %w", err)
 	}
 
-	log.Info("Login successful", "username", username)
-	fmt.Printf("✅ Login successful! Tokens saved.\n")
+	log.Info("OAuth login successful", "username", username)
+	fmt.Printf("✅ OAuth authentication successful! Tokens saved.\n")
+	fmt.Printf("📱 You can now use Maigo CLI commands.\n")
 	return nil
 }
 
-// runRegister handles user registration
+// runRegister handles user registration using OAuth 2.0 flow
 func runRegister(cfg *config.Config, log *logger.Logger, username, email string) error {
+	// For OAuth 2.0 flow, registration happens on the web interface
+	// The CLI will guide user to register through browser
+	
+	fmt.Printf("🔐 To register for Maigo, you'll need to complete registration in your browser.\n")
+	fmt.Printf("📧 Username: %s\n", username)
+	fmt.Printf("📧 Email: %s\n", email)
+	fmt.Printf("\n")
+	
+	// Start OAuth flow - this will open browser where user can register
+	oauthClient := NewOAuthClient(cfg, log)
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // Longer timeout for registration
+	defer cancel()
+	
+	fmt.Printf("🌐 Opening browser for registration and authentication...\n")
+	
+	tokenResponse, err := oauthClient.PerformOAuthFlow(ctx)
+	if err != nil {
+		log.Error("OAuth registration flow failed", "username", username, "email", email, "error", err)
+		return fmt.Errorf("OAuth registration failed: %w", err)
+	}
+
+	// Save tokens
 	client := NewAPIClient(cfg)
-
-	// Get password from user
-	fmt.Print("Password: ")
-	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
-	}
-	password := string(passwordBytes)
-	fmt.Println() // New line after password input
-
-	// Register
-	log.Info("Attempting to register", "username", username, "email", email)
-	response, err := client.Register(username, email, password)
-	if err != nil {
-		log.Error("Registration failed", "username", username, "email", email, "error", err)
-		return fmt.Errorf("registration failed: %w", err)
+	if err := client.SaveTokens(tokenResponse); err != nil {
+		log.Error("Failed to save tokens after registration", "error", err)
+		return fmt.Errorf("failed to save authentication tokens: %w", err)
 	}
 
-	log.Info("Registration successful", "username", username)
-	fmt.Printf("✅ Registration successful!\n")
-
-	// Check if tokens were returned and save them
-	if tokensData, ok := (*response)["tokens"]; ok {
-		if tokensMap, ok := tokensData.(map[string]interface{}); ok {
-			// Extract token data
-			accessToken, _ := tokensMap["access_token"].(string)
-			refreshToken, _ := tokensMap["refresh_token"].(string)
-			tokenType, _ := tokensMap["token_type"].(string)
-			expiresIn, _ := tokensMap["expires_in"].(float64)
-
-			if accessToken != "" {
-				tokens := &models.TokenResponse{
-					AccessToken:  accessToken,
-					RefreshToken: refreshToken,
-					TokenType:    tokenType,
-					ExpiresIn:    int(expiresIn),
-				}
-
-				if err := client.SaveTokens(tokens); err != nil {
-					log.Warn("Failed to save tokens after registration", "error", err)
-					fmt.Println("⚠️  Registration successful but failed to save tokens. Please login manually.")
-				} else {
-					fmt.Println("✅ Tokens saved automatically.")
-				}
-			}
-		}
-	}
-
+	log.Info("OAuth registration successful", "username", username, "email", email)
+	fmt.Printf("✅ Registration and authentication successful!\n")
+	fmt.Printf("📱 You can now use Maigo CLI commands.\n")
 	return nil
 }
 
