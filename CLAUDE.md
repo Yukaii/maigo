@@ -1,6 +1,6 @@
 # Maigo - Terminal-First URL Shortener
 
-### ✅ Implementation Status - PHASE 3 COMPLETE!
+### ✅ Implementation Status - PHASE 4 COMPLETE!
 - **[x] ✅ Go project structure** with modern conventions (cmd/, internal/, pkg/, configs/)
 - **[x] ✅ Cobra CLI implementation** with imperative, easy-to-use commands
 - **[x] ✅ Gin HTTP server** with middleware stack and OAuth2 endpoints
@@ -11,13 +11,23 @@
 - **[x] ✅ Integration test suite** comprehensive HTTP API testing with testify
 - **[x] ✅ Core URL shortening** Base62 encoding, collision detection, hit tracking
 - **[x] ✅ OAuth2 authentication** JWT token management and secure sessions
-
 - **[x] ✅ Testing infrastructure** automated database setup and CI-ready tests
+- **[x] ✅ Imperative CLI commands** direct commands (shorten, list, delete, get, stats)
+- **[x] ✅ Enhanced CLI UX** better error messages, confirmation prompts, local token storage
+- **[x] ✅ SSH TUI removal** deprecated and removed all SSH TUI code and dependencies
+
+Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused experience:
+
+- ✅ **Complete OAuth2 authentication** with JWT tokens
+- ✅ **Imperative CLI commands** for direct URL management  
+- ✅ **Minimal web UI** for OAuth2 completion only
+- ✅ **Production-ready architecture** with PostgreSQL and comprehensive testing
+
+**Current Status**: Phase 4 complete, ready for Phase 5 advanced features.
 
 ## Project Overview
 Maigo is a **terminal-first URL shortener** built with Go, emphasizing a geek-focused experience with:
 - **Imperative CLI** - Simple, direct commands for URL management
-
 - **Minimal Web UI** - OAuth2 flow completion only
 - **Terminal-Only Workflow** - No web dashboard, pure command-line experience
 
@@ -71,9 +81,10 @@ maigo auth status                        # Show current auth status
 maigo shorten <url>                      # Create short URL, print result
 maigo shorten <url> --custom <code>      # Create with custom short code
 maigo list                               # List all user URLs
-maigo list --limit 10                   # List recent 10 URLs
+maigo list --limit 10                    # List recent 10 URLs
 maigo get <short-code>                   # Get URL details
 maigo delete <short-code>                # Delete URL
+maigo delete <short-code> --force        # Delete without confirmation
 maigo stats <short-code>                 # Show URL analytics
 
 # Server Operations
@@ -103,11 +114,10 @@ maigo config                             # Show configuration
 ```
 maigo/
 ├── cmd/
-│   ├── server/main.go           # HTTP/SSH server
+│   ├── server/main.go           # HTTP server
 │   └── maigo/main.go            # CLI application
 ├── internal/
 │   ├── server/handlers/         # HTTP handlers (minimal OAuth2)
-
 │   ├── database/models/         # Data models
 │   ├── oauth/                   # OAuth2 server
 │   ├── shortener/               # URL shortening logic
@@ -184,17 +194,9 @@ make test-setup   # Setup test database and run tests
 
 - [x] ✅ **Testing infrastructure** - Comprehensive integration tests with automated setup
 
-### 🚧 PHASE 4 - Refinement & Polish (Current)
-
- - [ ] **Remove SSH TUI server** - Deprecate and delete all SSH TUI code and references
+### 🚧 PHASE 5 - Advanced Features (Current)
 
 - [ ] **Minimal web OAuth2 UI** - Simple pages for token exchange only
-- [ ] **CLI command refinement** - Imperative, direct commands without interactive prompts
-
-- [ ] **Enhanced CLI UX** - Better error messages, progress indicators, local token storage
-
-### 📋 PHASE 5 - Advanced Features (Planned)
-
 - [ ] **Rate limiting** - Per-user API rate limiting
 - [ ] **URL expiration** - Optional TTL for short URLs
 - [ ] **API documentation** - OpenAPI specifications
@@ -209,7 +211,7 @@ make test-setup   # Setup test database and run tests
 
 ## Current Working Status
 
-### ✅ Verified Functionality (Phase 3 Complete)
+### ✅ Verified Functionality (Phase 4 Complete)
 
 ```bash
 # HTTP Server with OAuth2 Protection - Working ✅
@@ -227,27 +229,29 @@ curl -X POST http://localhost:8080/api/v1/urls \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com"}'
 
-
-
-# CLI Commands - Working ✅
-./tmp/maigo auth register yukai test@example.com
-./tmp/maigo shorten https://example.com
-./tmp/maigo list
+# Imperative CLI Commands - Working ✅
+./bin/maigo auth register yukai test@example.com
+./bin/maigo shorten https://example.com
+./bin/maigo list
+./bin/maigo get <short-code>
+./bin/maigo stats <short-code>
+./bin/maigo delete <short-code> --force
 ```
 
-### 🎯 Next Steps for Phase 4
+### 🎯 Next Steps for Phase 5
 
-**Priority 1: Refinement**
-Remove SSH TUI server (deprecate and delete all related code)
-Add minimal web OAuth2 pages for CLI token exchange
-Improve CLI commands to be more imperative and direct
+**Priority 1: Web OAuth2 Pages**
+- Create minimal web OAuth2 completion pages for CLI token exchange
+- Implement secure token exchange flow for CLI authentication
+- Add simple web pages for OAuth2 callback handling
 
-Add better error handling and user feedback
-Implement local token storage for CLI
+**Priority 2: Advanced Features**
+- Implement rate limiting and security features
+- Add URL expiration functionality
+- Create API documentation with OpenAPI specifications
 - Implement local token storage for CLI
 Implement rate limiting and security features
 Create API documentation
-The core functionality is **complete and working**. Maigo now provides a fully functional terminal-first URL shortener with OAuth2 authentication, SSH TUI interface, and comprehensive CLI commands.
 The core functionality is **complete and working**. Maigo now provides a fully functional terminal-first URL shortener with OAuth2 authentication and comprehensive CLI commands.
 - Implement rate limiting and security features
 Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused experience:
@@ -266,4 +270,4 @@ Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused exper
 - ✅ **Minimal web UI** for OAuth2 completion only
 - ✅ **Production-ready architecture** with PostgreSQL and comprehensive testing
 
-**Current Status**: Phase 3 complete, ready for Phase 4 refinements and polish.
+**Current Status**: Phase 4 complete, ready for Phase 5 advanced features.

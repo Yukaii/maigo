@@ -34,9 +34,9 @@ func main() {
 	// Create root command
 	rootCmd := &cobra.Command{
 		Use:   "maigo",
-		Short: "A modern URL shortener with SSH interface",
-		Long: `Maigo is a modern URL shortener that provides both HTTP API and SSH terminal interface.
-It supports OAuth2 authentication, rate limiting, and analytics.`,
+		Short: "A modern terminal-first URL shortener",
+		Long: `Maigo is a modern terminal-first URL shortener with OAuth2 authentication.
+It provides imperative CLI commands for direct URL management and analytics.`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 	}
 
@@ -44,8 +44,11 @@ It supports OAuth2 authentication, rate limiting, and analytics.`,
 	rootCmd.AddCommand(
 		cli.NewServerCommand(cfg, log),
 		cli.NewAuthCommand(cfg, log),
-		cli.NewShortCommand(cfg, log),
-		cli.NewSSHCommand(cfg, log),
+		cli.NewShortenCommand(cfg, log),
+		cli.NewListCommand(cfg, log),
+		cli.NewDeleteCommand(cfg, log),
+		cli.NewGetCommand(cfg, log),
+		cli.NewStatsCommand(cfg, log),
 		cli.NewMigrateCommand(cfg, log),
 		cli.NewVersionCommand(version, commit, date),
 	)

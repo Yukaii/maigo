@@ -76,6 +76,7 @@ func (s *HTTPServer) setupRoutes() {
 		{
 			urls.POST("", middleware.RateLimit(s.config.App.RateLimit), middleware.Auth(s.config), urlHandler.CreateShortURL)
 			urls.GET("/:code", urlHandler.GetURL)
+			urls.GET("/:code/stats", middleware.Auth(s.config), urlHandler.GetURLStats)
 			urls.DELETE("/:code", middleware.Auth(s.config), urlHandler.DeleteURL)
 		}
 

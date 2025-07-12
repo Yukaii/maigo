@@ -4,7 +4,8 @@
         "/zig build(.*)?/": true,
         "/zig test(.*)?/": true,
         "/go mod(.*)?/": true,
-        "/go build(.*)?/": true
+        "/go build(.*)?/": true,
+        "/make(.*)?/": true
     },
     "zig.testArgs": [
         "build",

@@ -265,6 +265,42 @@ func (c *APIClient) DeleteURL(shortCode string) error {
 	return nil
 }
 
+// GetURL gets details of a specific short URL
+func (c *APIClient) GetURL(shortCode string) (*map[string]interface{}, error) {
+	token, err := c.GetValidToken()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("/api/v1/urls/%s", shortCode)
+	
+	var response map[string]interface{}
+	err = c.makeRequest("GET", url, nil, &response, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get URL details: %w", err)
+	}
+
+	return &response, nil
+}
+
+// GetURLStats gets analytics for a specific short URL
+func (c *APIClient) GetURLStats(shortCode string) (*map[string]interface{}, error) {
+	token, err := c.GetValidToken()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("/api/v1/urls/%s/stats", shortCode)
+	
+	var response map[string]interface{}
+	err = c.makeRequest("GET", url, nil, &response, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get URL statistics: %w", err)
+	}
+
+	return &response, nil
+}
+
 // makeRequest makes an HTTP request to the API
 func (c *APIClient) makeRequest(method, path string, body interface{}, response interface{}, token string) error {
 	url := c.BaseURL + path

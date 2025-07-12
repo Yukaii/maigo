@@ -27,7 +27,7 @@ type URLHandler struct {
 // NewURLHandler creates a new URL handler
 func NewURLHandler(db *pgxpool.Pool, cfg *config.Config, log *logger.Logger) *URLHandler {
 	urlRepo := repository.NewURLRepository(db)
-	
+
 	// Create shortener service with existence checker
 	shortenerService := shortener.NewShortenerService(
 		cfg.App.ShortCodeLength,
@@ -110,8 +110,8 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 		response["user_id"] = *url.UserID
 	}
 
-	h.logger.Info("Created short URL", 
-		"short_code", url.ShortCode, 
+	h.logger.Info("Created short URL",
+		"short_code", url.ShortCode,
 		"target_url", url.TargetURL,
 	)
 
@@ -201,14 +201,14 @@ func (h *URLHandler) RedirectShortURL(c *gin.Context) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		if err := h.urlRepo.IncrementHits(ctx, shortCode); err != nil {
 			h.logger.Error("Failed to increment hits", "short_code", shortCode, "error", err)
 		}
 	}()
 
-	h.logger.Info("Redirecting URL", 
-		"short_code", shortCode, 
+	h.logger.Info("Redirecting URL",
+		"short_code", shortCode,
 		"target_url", url.TargetURL,
 		"hits", url.Hits,
 	)
@@ -359,6 +359,89 @@ func (h *URLHandler) GetUserURLs(c *gin.Context) {
 			Pages:    pages,
 		},
 	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetURLStats retrieves analytics for a specific short URL
+func (h *URLHandler) GetURLStats(c *gin.Context) {
+	shortCode := c.Param("code")
+	if shortCode == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Short code is required",
+		})
+		return
+	}
+
+	// Get user ID from context
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "User authentication required",
+		})
+		return
+	}
+
+	uid, ok := userID.(int64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error:   "Unauthorized",
+			Message: "Invalid user ID",
+		})
+		return
+	}
+
+	// Validate short code
+	if err := h.shortener.ValidateShortCode(shortCode); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "Invalid short code format",
+		})
+		return
+	}
+
+	// Get URL from database
+	url, err := h.urlRepo.GetByShortCode(c.Request.Context(), shortCode)
+	if err != nil {
+		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
+		c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "Not Found",
+			Message: "Short URL not found",
+		})
+		return
+	}
+
+	// Check ownership
+	if url.UserID == nil || *url.UserID != uid {
+		c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "Forbidden",
+			Message: "You don't have permission to view statistics for this URL",
+		})
+		return
+	}
+
+	// Build analytics response
+	response := map[string]interface{}{
+		"id":         url.ID,
+		"short_code": url.ShortCode,
+		"url":        url.TargetURL,
+		"short_url":  "https://" + h.config.App.BaseDomain + "/" + url.ShortCode,
+		"hits":       url.Hits,
+		"created_at": url.CreatedAt.Format(time.RFC3339),
+	}
+
+	// TODO: Add more detailed analytics (daily/weekly/monthly breakdowns)
+	// For now, just return basic stats
+	response["timeline"] = []map[string]interface{}{
+		{
+			"date": url.CreatedAt.Format("2006-01-02"),
+			"hits": url.Hits,
+		},
+	}
+
+	h.logger.Info("Retrieved URL statistics", "short_code", shortCode, "user_id", uid)
 
 	c.JSON(http.StatusOK, response)
 }

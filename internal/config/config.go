@@ -13,7 +13,6 @@ import (
 type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Server   ServerConfig   `mapstructure:"server"`
-	SSH      SSHConfig      `mapstructure:"ssh"`
 	OAuth2   OAuth2Config   `mapstructure:"oauth2"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	App      AppConfig      `mapstructure:"app"`
@@ -39,13 +38,6 @@ type ServerConfig struct {
 	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
-}
-
-// SSHConfig holds SSH server configuration
-type SSHConfig struct {
-	Port        int    `mapstructure:"port"`
-	Host        string `mapstructure:"host"`
-	HostKeyPath string `mapstructure:"host_key_path"`
 }
 
 // OAuth2Config holds OAuth2 configuration
@@ -146,11 +138,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.write_timeout", "30s")
 	v.SetDefault("server.idle_timeout", "120s")
 
-	// SSH defaults
-	v.SetDefault("ssh.port", 2222)
-	v.SetDefault("ssh.host", "127.0.0.1")
-	v.SetDefault("ssh.host_key_path", "host_keys/ssh_host_rsa_key")
-
 	// OAuth2 defaults
 	v.SetDefault("oauth2.client_id", "maigo_cli")
 	v.SetDefault("oauth2.client_secret", "dev_secret_change_in_production")
@@ -188,8 +175,6 @@ func bindEnvVars(v *viper.Viper) {
 
 		"HTTP_PORT": "server.port",
 		"HOST":      "server.host",
-
-		"SSH_PORT": "ssh.port",
 
 		"OAUTH2_CLIENT_ID":     "oauth2.client_id",
 		"OAUTH2_CLIENT_SECRET": "oauth2.client_secret",
@@ -261,9 +246,4 @@ func (c *Config) DatabaseURL() string {
 // ServerAddr returns the server address
 func (c *Config) ServerAddr() string {
 	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
-}
-
-// SSHAddr returns the SSH server address
-func (c *Config) SSHAddr() string {
-	return fmt.Sprintf("%s:%d", c.SSH.Host, c.SSH.Port)
 }

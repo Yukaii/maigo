@@ -1,4 +1,4 @@
-.PHONY: help setup build test test-unit test-integration test-setup test-clean lint fmt clean dev server ssh-server migrate-up migrate-down db-setup db-reset db-seed
+.PHONY: help setup build test test-unit test-integration test-setup test-clean lint fmt clean dev server migrate-up migrate-down db-setup db-reset db-seed
 .DEFAULT_GOAL := help
 
 # Variables
@@ -105,12 +105,7 @@ clean:
 ## server: Start HTTP server
 server: build
 	@echo "Starting HTTP server..."
-	./bin/$(SERVER_BINARY) server
-
-## ssh-server: Start SSH TUI server  
-ssh-server: build
-	@echo "Starting SSH TUI server..."
-	./bin/$(SERVER_BINARY) ssh
+	./bin/$(SERVER_BINARY)
 
 ## migrate-up: Apply database migrations
 migrate-up:

@@ -17,7 +17,6 @@ import (
 	"github.com/yukaii/maigo/internal/database/models"
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/server"
-	"github.com/yukaii/maigo/internal/ssh"
 )
 
 // NewServerCommand creates the server command
@@ -79,91 +78,103 @@ func NewAuthCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 	return cmd
 }
 
-// NewShortCommand creates the URL shortening command
-func NewShortCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
+// NewShortenCommand creates the shorten command (imperative)
+func NewShortenCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "short",
-		Short: "URL shortening operations",
-		Long:  "Create and manage short URLs",
+		Use:   "shorten [URL]",
+		Short: "Create a short URL",
+		Long:  "Create a short URL from a long URL",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			custom, _ := cmd.Flags().GetString("custom")
+			return runCreateShortURL(cfg, log, args[0], custom)
+		},
 	}
 
-	// Add subcommands
-	cmd.AddCommand(
-		&cobra.Command{
-			Use:   "create [URL]",
-			Short: "Create a short URL",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				custom, _ := cmd.Flags().GetString("custom")
-				return runCreateShortURL(cfg, log, args[0], custom)
-			},
-		},
-		&cobra.Command{
-			Use:   "list",
-			Short: "List your short URLs",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				page, _ := cmd.Flags().GetInt("page")
-				pageSize, _ := cmd.Flags().GetInt("page-size")
-				return runListURLs(cfg, log, page, pageSize)
-			},
-		},
-		&cobra.Command{
-			Use:   "delete [short-code]",
-			Short: "Delete a short URL",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return runDeleteURL(cfg, log, args[0])
-			},
-		},
-	)
-
 	// Add flags
-	createCmd := cmd.Commands()[0] // create command
-	createCmd.Flags().String("custom", "", "Custom short code")
-	
-	listCmd := cmd.Commands()[1] // list command
-	listCmd.Flags().Int("page", 1, "Page number")
-	listCmd.Flags().Int("page-size", 20, "Items per page")
+	cmd.Flags().String("custom", "", "Custom short code")
 
 	return cmd
 }
 
-// NewSSHCommand creates the SSH server command
-func NewSSHCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
+// NewListCommand creates the list command (imperative)
+func NewListCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "ssh",
-		Short: "SSH server operations",
-		Long:  "Start and manage the SSH terminal interface",
+		Use:   "list",
+		Short: "List your short URLs",
+		Long:  "List all short URLs belonging to the authenticated user",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log.Info("Starting SSH TUI server", "address", cfg.SSHAddr())
-
-			// Initialize database connection
-			db, err := database.Connect(cfg)
-			if err != nil {
-				return fmt.Errorf("failed to connect to database: %w", err)
+			page, _ := cmd.Flags().GetInt("page")
+			pageSize, _ := cmd.Flags().GetInt("page-size")
+			limit, _ := cmd.Flags().GetInt("limit")
+			if limit > 0 {
+				pageSize = limit
 			}
-			defer db.Close()
+			return runListURLs(cfg, log, page, pageSize)
+		},
+	}
 
-			// Create and start SSH server
-			sshServer := ssh.NewServer(cfg, db, log)
+	// Add flags
+	cmd.Flags().Int("page", 1, "Page number")
+	cmd.Flags().Int("page-size", 20, "Items per page")
+	cmd.Flags().Int("limit", 0, "Limit number of results (alias for page-size)")
 
-			// Generate host key if needed
-			if err := sshServer.GenerateHostKey(); err != nil {
-				log.Error("Failed to generate host key", "error", err)
-				return fmt.Errorf("failed to generate host key: %w", err)
+	return cmd
+}
+
+// NewDeleteCommand creates the delete command (imperative)
+func NewDeleteCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "delete [short-code]",
+		Short: "Delete a short URL",
+		Long:  "Delete a short URL by its short code",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Add confirmation prompt for destructive operation
+			force, _ := cmd.Flags().GetBool("force")
+			if !force {
+				fmt.Printf("Are you sure you want to delete short URL '%s'? (y/N): ", args[0])
+				var response string
+				fmt.Scanln(&response)
+				if response != "y" && response != "Y" && response != "yes" {
+					fmt.Println("❌ Deletion cancelled.")
+					return nil
+				}
 			}
+			return runDeleteURL(cfg, log, args[0])
+		},
+	}
 
-			// Setup signal handling
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-			defer stop()
+	// Add flags
+	cmd.Flags().BoolP("force", "f", false, "Force deletion without confirmation")
 
-			// Start the server (this blocks until shutdown signal)
-			if err := sshServer.Start(ctx); err != nil {
-				log.Error("SSH server failed", "error", err)
-				return fmt.Errorf("SSH server failed: %w", err)
-			}
+	return cmd
+}
 
-			return nil
+// NewGetCommand creates the get command (imperative)
+func NewGetCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "get [short-code]",
+		Short: "Get details of a short URL",
+		Long:  "Get detailed information about a short URL by its short code",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGetURL(cfg, log, args[0])
+		},
+	}
+
+	return cmd
+}
+
+// NewStatsCommand creates the stats command (imperative)
+func NewStatsCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "stats [short-code]",
+		Short: "Show analytics for a short URL",
+		Long:  "Show detailed analytics and statistics for a short URL",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGetURLStats(cfg, log, args[0])
 		},
 	}
 
@@ -545,6 +556,70 @@ func runDeleteURL(cfg *config.Config, log *logger.Logger, shortCode string) erro
 
 	log.Info("URL deleted successfully", "short_code", shortCode)
 	fmt.Printf("✅ Short URL '%s' deleted successfully!\n", shortCode)
+
+	return nil
+}
+
+// runGetURL gets details of a specific short URL
+func runGetURL(cfg *config.Config, log *logger.Logger, shortCode string) error {
+	client := NewAPIClient(cfg)
+
+	log.Info("Getting URL details", "short_code", shortCode)
+	response, err := client.GetURL(shortCode)
+	if err != nil {
+		log.Error("Failed to get URL details", "short_code", shortCode, "error", err)
+		return fmt.Errorf("failed to get URL details: %w", err)
+	}
+
+	// Display result
+	fmt.Printf("📋 URL Details for '%s'\n\n", shortCode)
+	fmt.Printf("Short Code:   %s\n", (*response)["short_code"])
+	fmt.Printf("Target URL:   %s\n", (*response)["url"])
+	fmt.Printf("Short URL:    %s\n", (*response)["short_url"])
+	fmt.Printf("Hits:         %v\n", (*response)["hits"])
+	fmt.Printf("Created:      %s\n", (*response)["created_at"])
+	
+	if updatedAt, ok := (*response)["updated_at"]; ok && updatedAt != nil {
+		fmt.Printf("Last Hit:     %s\n", updatedAt)
+	}
+
+	return nil
+}
+
+// runGetURLStats gets analytics for a specific short URL
+func runGetURLStats(cfg *config.Config, log *logger.Logger, shortCode string) error {
+	client := NewAPIClient(cfg)
+
+	log.Info("Getting URL statistics", "short_code", shortCode)
+	response, err := client.GetURLStats(shortCode)
+	if err != nil {
+		log.Error("Failed to get URL statistics", "short_code", shortCode, "error", err)
+		return fmt.Errorf("failed to get URL statistics: %w", err)
+	}
+
+	// Display statistics
+	fmt.Printf("📊 Analytics for '%s'\n\n", shortCode)
+	fmt.Printf("Target URL:   %s\n", (*response)["url"])
+	fmt.Printf("Total Hits:   %v\n", (*response)["hits"])
+	fmt.Printf("Created:      %s\n", (*response)["created_at"])
+	
+	if lastHit, ok := (*response)["last_hit"]; ok && lastHit != nil {
+		fmt.Printf("Last Hit:     %s\n", lastHit)
+	} else {
+		fmt.Printf("Last Hit:     Never\n")
+	}
+
+	// Show hit timeline if available
+	if timeline, ok := (*response)["timeline"]; ok && timeline != nil {
+		fmt.Printf("\n📈 Recent Activity:\n")
+		if timelineData, ok := timeline.([]interface{}); ok {
+			for _, entry := range timelineData {
+				if entryMap, ok := entry.(map[string]interface{}); ok {
+					fmt.Printf("  %s: %v hits\n", entryMap["date"], entryMap["hits"])
+				}
+			}
+		}
+	}
 
 	return nil
 }
