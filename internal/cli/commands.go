@@ -27,11 +27,69 @@ func NewServerCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 		Short: "Start the HTTP server",
 		Long:  "Start the HTTP server for the Maigo URL shortener",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Override config with command-line flags if provided
+			if err := overrideConfigFromFlags(cmd, cfg); err != nil {
+				return fmt.Errorf("failed to override config from flags: %w", err)
+			}
 			return runServer(cfg, log)
 		},
 	}
 
+	// Add database configuration flags (12-factor app style)
+	cmd.Flags().String("database-url", "", "Database connection URL (overrides individual DB flags)")
+	cmd.Flags().String("db-host", "", "Database host")
+	cmd.Flags().Int("db-port", 0, "Database port")
+	cmd.Flags().String("db-name", "", "Database name")
+	cmd.Flags().String("db-user", "", "Database user")
+	cmd.Flags().String("db-password", "", "Database password")
+	cmd.Flags().String("db-ssl-mode", "", "Database SSL mode (disable, require, etc.)")
+
+	// Add server configuration flags
+	cmd.Flags().IntP("port", "p", 0, "HTTP server port")
+	cmd.Flags().String("host", "", "HTTP server host")
+
 	return cmd
+}
+
+// overrideConfigFromFlags overrides configuration values with command-line flags
+func overrideConfigFromFlags(cmd *cobra.Command, cfg *config.Config) error {
+	// Database configuration overrides
+	if databaseURL, _ := cmd.Flags().GetString("database-url"); databaseURL != "" {
+		cfg.Database.URL = databaseURL
+	}
+	if dbHost, _ := cmd.Flags().GetString("db-host"); dbHost != "" {
+		cfg.Database.Host = dbHost
+	}
+	if dbPort, _ := cmd.Flags().GetInt("db-port"); cmd.Flags().Changed("db-port") {
+		cfg.Database.Port = dbPort
+	}
+	if dbName, _ := cmd.Flags().GetString("db-name"); dbName != "" {
+		cfg.Database.Name = dbName
+	}
+	if dbUser, _ := cmd.Flags().GetString("db-user"); dbUser != "" {
+		cfg.Database.User = dbUser
+	}
+	if dbPassword, _ := cmd.Flags().GetString("db-password"); dbPassword != "" {
+		cfg.Database.Password = dbPassword
+	}
+	if dbSSLMode, _ := cmd.Flags().GetString("db-ssl-mode"); dbSSLMode != "" {
+		cfg.Database.SSLMode = dbSSLMode
+	}
+
+	// Server configuration overrides
+	if port, _ := cmd.Flags().GetInt("port"); cmd.Flags().Changed("port") {
+		cfg.Server.Port = port
+	}
+	if host, _ := cmd.Flags().GetString("host"); host != "" {
+		cfg.Server.Host = host
+	}
+
+	// Re-parse DATABASE_URL if it was set via flag
+	if err := cfg.ParseDatabaseURL(); err != nil {
+		return fmt.Errorf("failed to parse DATABASE_URL from flag: %w", err)
+	}
+
+	return nil
 }
 
 // NewAuthCommand creates the auth command

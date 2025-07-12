@@ -1,7 +1,13 @@
 # Maigo URL Shortener Configuration
 
-# Database Configuration
+# Database Configuration (12-Factor App Style)
+# Option 1: Use DATABASE_URL (recommended for production)
+# database:
+#   url: postgres://username:password@host:port/dbname?sslmode=require
+
+# Option 2: Individual parameters (development)
 database:
+  # url: "" # Set DATABASE_URL environment variable instead
   host: localhost
   port: 5432
   name: maigo

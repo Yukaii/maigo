@@ -148,6 +148,19 @@ make test         # Run all tests with coverage
 # Server operations  
 make server       # Start HTTP server (port 8080) using maigo server command
 
+# 12-Factor App Configuration (Recommended for Production)
+# Environment variables (highest priority)
+DATABASE_URL="postgres://user:pass@host:port/db?sslmode=require" maigo server
+PORT=8080 maigo server
+DEBUG=false LOG_LEVEL=info maigo server
+
+# Command-line flags (override config file)
+./maigo server --database-url "postgres://user:pass@localhost:5432/maigo"
+./maigo server --port 8080 --host 0.0.0.0
+./maigo server --db-host localhost --db-port 5432 --db-name maigo
+
+# Configuration file (lowest priority)
+./maigo server  # Uses config/config.yaml
 
 # CLI testing
 ./maigo auth register yukai test@example.com  # Register user
@@ -155,11 +168,126 @@ make server       # Start HTTP server (port 8080) using maigo server command
 ./maigo shorten https://example.com           # Create short URL
 ./maigo list                                  # List user's URLs
 
-
-
 # Database management
 make db-setup     # Initialize PostgreSQL database
 make test-setup   # Setup test database and run tests
+```
+
+## 12-Factor App Configuration
+
+Maigo follows [12-Factor App](https://12factor.net/config) principles for configuration management:
+
+### Environment Variables (Highest Priority)
+
+```bash
+# Database configuration (12-factor style)
+export DATABASE_URL="postgres://username:password@host:port/database?sslmode=require"
+
+# Alternative individual database parameters
+export DB_HOST="localhost"
+export DB_PORT="5432"
+export DB_NAME="maigo"
+export DB_USER="postgres"
+export DB_PASSWORD="password"
+export DB_SSL_MODE="require"
+
+# Server configuration
+export PORT="8080"              # Standard Heroku PORT variable
+export HOST="0.0.0.0"           # Bind to all interfaces
+
+# Application configuration
+export JWT_SECRET="your-secure-jwt-secret"
+export OAUTH2_CLIENT_SECRET="your-oauth-client-secret"
+export DEBUG="false"
+export LOG_LEVEL="info"
+export LOG_FORMAT="json"
+
+# Start server with environment variables
+maigo server
+```
+
+### Command-Line Flags (Medium Priority)
+
+```bash
+# Database configuration via flags
+maigo server \
+  --database-url "postgres://user:pass@host:port/db?sslmode=require" \
+  --port 8080 \
+  --host 0.0.0.0
+
+# Individual database parameters
+maigo server \
+  --db-host localhost \
+  --db-port 5432 \
+  --db-name maigo \
+  --db-user postgres \
+  --db-password password \
+  --db-ssl-mode require
+```
+
+### Configuration File (Lowest Priority)
+
+```yaml
+# config/config.yaml
+database:
+  # Option 1: DATABASE_URL (recommended)
+  url: "postgres://user:pass@host:port/db?sslmode=require"
+  
+  # Option 2: Individual parameters
+  host: localhost
+  port: 5432
+  name: maigo
+  user: postgres
+  password: password
+  ssl_mode: require
+
+server:
+  port: 8080
+  host: 0.0.0.0
+```
+
+### Production Deployment Examples
+
+```bash
+# Heroku-style deployment
+DATABASE_URL="postgres://user:pass@host:port/db?sslmode=require" \
+PORT=8080 \
+JWT_SECRET="$(openssl rand -hex 32)" \
+LOG_LEVEL=info \
+LOG_FORMAT=json \
+./maigo server
+
+# Docker deployment
+docker run -e DATABASE_URL="postgres://..." \
+           -e PORT=8080 \
+           -e JWT_SECRET="..." \
+           -p 8080:8080 \
+           maigo:latest
+
+# Kubernetes deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maigo
+spec:
+  template:
+    spec:
+      containers:
+      - name: maigo
+        image: maigo:latest
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: maigo-secrets
+              key: database-url
+        - name: PORT
+          value: "8080"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: maigo-secrets
+              key: jwt-secret
 ```
 
 ## API Endpoints
@@ -233,7 +361,16 @@ make test-setup   # Setup test database and run tests
 - [x] ✅ **CLI application** - Cobra framework with imperative commands
 - [x] ✅ **Testing infrastructure** - Comprehensive integration tests with automated setup
 
-### 🚧 PHASE 5 - Advanced Features (Next)
+### ✅ PHASE 5 - 12-Factor App Configuration (2025-07-13) 
+**Just completed:**
+- [x] ✅ **DATABASE_URL support** - Standard PostgreSQL connection URL parsing
+- [x] ✅ **Environment variable mapping** - 12-factor compatible env vars (PORT, DATABASE_URL, etc.)
+- [x] ✅ **Command-line flags** - Server command database configuration override
+- [x] ✅ **Configuration precedence** - ENV vars > CLI flags > config file
+- [x] ✅ **Production deployment** - Heroku/Docker/K8s ready configuration
+- [x] ✅ **Documentation** - Comprehensive 12-factor configuration examples
+
+### 🚧 PHASE 6 - Advanced Features (Next)
 
 - [ ] **Enhanced error handling** - Better OAuth error messages and recovery
 - [ ] **Token refresh automation** - Automatic token renewal in CLI

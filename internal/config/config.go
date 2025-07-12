@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +23,10 @@ type Config struct {
 
 // DatabaseConfig holds database configuration
 type DatabaseConfig struct {
+	// Primary DATABASE_URL (12-factor app style)
+	URL string `mapstructure:"url"`
+	
+	// Individual connection parameters (fallback)
 	Host     string `mapstructure:"host"`
 	Port     int    `mapstructure:"port"`
 	Name     string `mapstructure:"name"`
@@ -111,6 +117,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Parse DATABASE_URL if provided and populate individual fields
+	if err := cfg.ParseDatabaseURL(); err != nil {
+		return nil, fmt.Errorf("failed to parse DATABASE_URL: %w", err)
+	}
+
 	// Validate configuration
 	if err := validateConfig(&cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -121,7 +132,8 @@ func Load() (*Config, error) {
 
 // setDefaults sets default configuration values
 func setDefaults(v *viper.Viper) {
-	// Database defaults
+	// Database defaults (individual parameters as fallback)
+	v.SetDefault("database.url", "") // DATABASE_URL takes precedence when set
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.port", 5432)
 	v.SetDefault("database.name", "maigo")
@@ -166,6 +178,10 @@ func setDefaults(v *viper.Viper) {
 // bindEnvVars binds environment variables to configuration keys
 func bindEnvVars(v *viper.Viper) {
 	envVars := map[string]string{
+		// 12-factor DATABASE_URL support (highest priority)
+		"DATABASE_URL": "database.url",
+		
+		// Individual database parameters (12-factor compatible)
 		"DB_HOST":     "database.host",
 		"DB_PORT":     "database.port",
 		"DB_NAME":     "database.name",
@@ -173,16 +189,21 @@ func bindEnvVars(v *viper.Viper) {
 		"DB_PASSWORD": "database.password",
 		"DB_SSL_MODE": "database.ssl_mode",
 
-		"HTTP_PORT": "server.port",
+		// Server configuration (12-factor compatible)
+		"PORT":      "server.port",  // Standard Heroku PORT variable
+		"HTTP_PORT": "server.port",  // Alternative naming
 		"HOST":      "server.host",
 
+		// OAuth2 configuration
 		"OAUTH2_CLIENT_ID":     "oauth2.client_id",
 		"OAUTH2_CLIENT_SECRET": "oauth2.client_secret",
 		"OAUTH2_REDIRECT_URI":  "oauth2.redirect_uri",
 
+		// JWT configuration
 		"JWT_SECRET":     "jwt.secret",
 		"JWT_EXPIRATION": "jwt.expiration",
 
+		// Application configuration
 		"BASE_DOMAIN":            "app.base_domain",
 		"SHORT_CODE_LENGTH":      "app.short_code_length",
 		"RATE_LIMIT_REQUESTS":    "app.rate_limit.requests",
@@ -190,6 +211,7 @@ func bindEnvVars(v *viper.Viper) {
 		"DEBUG":                  "app.debug",
 		"CORS_ENABLED":           "app.cors_enabled",
 
+		// Logging configuration
 		"LOG_LEVEL":  "log.level",
 		"LOG_FORMAT": "log.format",
 	}
@@ -203,15 +225,19 @@ func bindEnvVars(v *viper.Viper) {
 
 // validateConfig validates the configuration
 func validateConfig(cfg *Config) error {
-	if cfg.Database.Host == "" {
-		return fmt.Errorf("database host is required")
+	// Database validation - either DATABASE_URL or individual parameters required
+	if cfg.Database.URL == "" {
+		if cfg.Database.Host == "" {
+			return fmt.Errorf("database host is required (or set DATABASE_URL)")
+		}
+		if cfg.Database.Name == "" {
+			return fmt.Errorf("database name is required (or set DATABASE_URL)")
+		}
+		if cfg.Database.User == "" {
+			return fmt.Errorf("database user is required (or set DATABASE_URL)")
+		}
 	}
-	if cfg.Database.Name == "" {
-		return fmt.Errorf("database name is required")
-	}
-	if cfg.Database.User == "" {
-		return fmt.Errorf("database user is required")
-	}
+	
 	if cfg.OAuth2.ClientID == "" {
 		return fmt.Errorf("oauth2 client ID is required")
 	}
@@ -233,6 +259,12 @@ func validateConfig(cfg *Config) error {
 
 // DatabaseURL returns the database connection URL
 func (c *Config) DatabaseURL() string {
+	// If DATABASE_URL is set, use it directly (12-factor app style)
+	if c.Database.URL != "" {
+		return c.Database.URL
+	}
+	
+	// Otherwise, construct URL from individual parameters
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		c.Database.User,
 		c.Database.Password,
@@ -246,4 +278,54 @@ func (c *Config) DatabaseURL() string {
 // ServerAddr returns the server address
 func (c *Config) ServerAddr() string {
 	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+}
+
+// ParseDatabaseURL parses DATABASE_URL and populates individual database fields
+func (c *Config) ParseDatabaseURL() error {
+	if c.Database.URL == "" {
+		return nil // No DATABASE_URL to parse
+	}
+
+	parsedURL, err := url.Parse(c.Database.URL)
+	if err != nil {
+		return fmt.Errorf("invalid DATABASE_URL format: %w", err)
+	}
+
+	// Only populate individual fields if they're not already set
+	if c.Database.Host == "" && parsedURL.Hostname() != "" {
+		c.Database.Host = parsedURL.Hostname()
+	}
+
+	if c.Database.Port == 0 && parsedURL.Port() != "" {
+		if port, err := strconv.Atoi(parsedURL.Port()); err == nil {
+			c.Database.Port = port
+		}
+	}
+
+	if c.Database.Name == "" && parsedURL.Path != "" {
+		// Remove leading slash from path
+		dbName := strings.TrimPrefix(parsedURL.Path, "/")
+		if dbName != "" {
+			c.Database.Name = dbName
+		}
+	}
+
+	if c.Database.User == "" && parsedURL.User != nil {
+		c.Database.User = parsedURL.User.Username()
+	}
+
+	if c.Database.Password == "" && parsedURL.User != nil {
+		if password, ok := parsedURL.User.Password(); ok {
+			c.Database.Password = password
+		}
+	}
+
+	// Parse query parameters for SSL mode and other options
+	if c.Database.SSLMode == "" {
+		if sslMode := parsedURL.Query().Get("sslmode"); sslMode != "" {
+			c.Database.SSLMode = sslMode
+		}
+	}
+
+	return nil
 }
