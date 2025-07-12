@@ -12,6 +12,9 @@ import (
 // Auth is a middleware that validates JWT tokens
 func Auth(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Debug log
+		c.Header("X-Debug-Auth", "called")
+		
 		// Get authorization header
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -58,7 +61,12 @@ func Auth(cfg *config.Config) gin.HandlerFunc {
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			// Set user info in context
 			if userID, exists := claims["user_id"]; exists {
-				c.Set("user_id", userID)
+				// Convert float64 to int64 (JWT numbers are float64)
+				if userIDFloat, ok := userID.(float64); ok {
+					c.Set("user_id", int64(userIDFloat))
+				} else if userIDInt, ok := userID.(int64); ok {
+					c.Set("user_id", userIDInt)
+				}
 			}
 			if username, exists := claims["username"]; exists {
 				c.Set("username", username)

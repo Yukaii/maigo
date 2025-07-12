@@ -74,7 +74,7 @@ func (s *HTTPServer) setupRoutes() {
 		// URL shortening endpoints
 		urls := v1.Group("/urls")
 		{
-			urls.POST("", middleware.RateLimit(s.config.App.RateLimit), urlHandler.CreateShortURL)
+			urls.POST("", middleware.RateLimit(s.config.App.RateLimit), middleware.Auth(s.config), urlHandler.CreateShortURL)
 			urls.GET("/:code", urlHandler.GetURL)
 			urls.DELETE("/:code", middleware.Auth(s.config), urlHandler.DeleteURL)
 		}

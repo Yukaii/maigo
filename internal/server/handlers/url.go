@@ -113,7 +113,6 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 	h.logger.Info("Created short URL", 
 		"short_code", url.ShortCode, 
 		"target_url", url.TargetURL,
-		"user_id", userID,
 	)
 
 	c.JSON(http.StatusCreated, response)
