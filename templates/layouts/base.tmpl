@@ -1,0 +1,14 @@
+{{define "layouts/base.tmpl"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Maigo</title>
+    {{template "styles/oauth.css" .}}
+</head>
+<body>
+    {{template "content" .}}
+</body>
+</html>
+{{end}}
