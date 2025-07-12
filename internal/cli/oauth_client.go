@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/url"
@@ -125,7 +126,7 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 		}
 		
 		c.logger.Info("Tokens obtained successfully")
-		fmt.Printf("✅ OAuth authorization successful!\n")
+		fmt.Printf("[SUCCESS] OAuth authorization successful!\n")
 		
 		return tokens, nil
 		
@@ -252,45 +253,245 @@ func (c *OAuthClient) handleCallback(w http.ResponseWriter, r *http.Request, cal
 	}
 
 	// Render response page
-	var html string
+	var htmlContent string
 	if result.Error != "" {
-		html = fmt.Sprintf(`
-<!DOCTYPE html>
-<html>
+		// Escape error content for HTML
+		errorCode := html.EscapeString(result.Error)
+		errorDescription := html.EscapeString(result.ErrorDescription)
+		
+		htmlContent = fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>OAuth Authorization Failed</title>
-    <style>body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth Authorization Failed - Maigo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .result-box {
+            background: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .error-icon {
+            font-size: 64px;
+            color: #dc3545;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #dc3545;
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .error-details {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .error-label {
+            font-weight: 600;
+            color: #721c24;
+            margin-bottom: 8px;
+        }
+        .error-value {
+            color: #721c24;
+            font-family: monospace;
+            background: rgba(255,255,255,0.7);
+            padding: 8px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        .instruction {
+            margin: 30px 0;
+            color: #6c757d;
+            font-size: 16px;
+        }
+        .close-instruction {
+            margin-top: 30px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 8px;
+            color: #495057;
+            font-size: 14px;
+        }
+        @media (max-width: 600px) {
+            body {
+                margin: 20px auto;
+                padding: 15px;
+            }
+            .result-box {
+                padding: 25px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <h2>❌ Authorization Failed</h2>
-    <p><strong>Error:</strong> %s</p>
-    <p><strong>Description:</strong> %s</p>
-    <p>You can close this window and try again.</p>
+    <div class="result-box">
+        <div class="error-icon">[ERROR]</div>
+        <h2>Authorization Failed</h2>
+        
+        <div class="error-details">
+            <div class="error-label">Error Code:</div>
+            <div class="error-value">%s</div>
+            
+            <div class="error-label" style="margin-top: 15px;">Description:</div>
+            <div class="error-value">%s</div>
+        </div>
+        
+        <div class="instruction">
+            The OAuth authorization process could not be completed successfully.
+        </div>
+        
+        <div class="close-instruction">
+            You can close this window and try the authorization process again from your terminal.
+        </div>
+    </div>
 </body>
-</html>`, result.Error, result.ErrorDescription)
+</html>`, errorCode, errorDescription)
 	} else {
-		html = `
-<!DOCTYPE html>
-<html>
+		htmlContent = `<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>OAuth Authorization Successful</title>
-    <style>body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth Authorization Successful - Maigo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .result-box {
+            background: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .success-icon {
+            font-size: 64px;
+            color: #28a745;
+            margin-bottom: 20px;
+            animation: checkmark 0.5s ease-in-out;
+        }
+        @keyframes checkmark {
+            0% { transform: scale(0); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        h2 {
+            color: #28a745;
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #155724;
+        }
+        .instruction {
+            margin: 30px 0;
+            color: #6c757d;
+            font-size: 16px;
+        }
+        .auto-close {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 8px;
+            color: #495057;
+            font-size: 14px;
+        }
+        .countdown {
+            font-weight: 600;
+            color: #007bff;
+        }
+        @media (max-width: 600px) {
+            body {
+                margin: 20px auto;
+                padding: 15px;
+            }
+            .result-box {
+                padding: 25px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <h2>✅ Authorization Successful</h2>
-    <p>You have successfully authorized the Maigo CLI application.</p>
-    <p>You can close this window and return to your terminal.</p>
+    <div class="result-box">
+        <div class="success-icon">[OK]</div>
+        <h2>Authorization Successful</h2>
+        
+        <div class="success-message">
+            <strong>Great!</strong> You have successfully authorized the Maigo CLI application.
+        </div>
+        
+        <div class="instruction">
+            You can now return to your terminal to continue using the Maigo CLI.
+        </div>
+        
+        <div class="auto-close">
+            This window will automatically close in <span class="countdown" id="countdown">3</span> seconds.
+        </div>
+    </div>
+
     <script>
-        // Auto-close after 3 seconds
-        setTimeout(function() { window.close(); }, 3000);
+        let seconds = 3;
+        const countdownElement = document.getElementById('countdown');
+        
+        const timer = setInterval(function() {
+            seconds--;
+            countdownElement.textContent = seconds;
+            
+            if (seconds <= 0) {
+                clearInterval(timer);
+                window.close();
+            }
+        }, 1000);
+        
+        // Also allow manual close
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' || e.key === 'Enter') {
+                window.close();
+            }
+        });
     </script>
 </body>
 </html>`
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(html))
+	w.Write([]byte(htmlContent))
 }
 
 // exchangeCodeForTokens exchanges authorization code for access tokens

@@ -306,7 +306,7 @@ func (h *OAuthHandler) renderLoginPage(c *gin.Context, req *oauth.AuthorizationR
 <body>
     <div class="auth-box">
         <div class="header">
-            <div class="lock-icon">&#128274;</div>
+            <div class="lock-icon">🔒</div>
             <h2>Maigo OAuth Authorization</h2>
         </div>
         
@@ -346,10 +346,10 @@ func (h *OAuthHandler) renderLoginPage(c *gin.Context, req *oauth.AuthorizationR
                 
                 <div class="button-container">
                     <button type="submit" name="action" value="authorize" class="btn">
-                        &#9989; Authorize Access
+                        ✅ Authorize Access
                     </button>
                     <button type="submit" name="action" value="deny" class="btn btn-deny">
-                        &#10060; Deny Access
+                        ❌ Deny Access
                     </button>
                 </div>
             </form>
