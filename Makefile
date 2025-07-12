@@ -4,9 +4,7 @@
 # Variables
 GO_VERSION := 1.21
 BINARY_NAME := maigo
-SERVER_BINARY := server
 MAIN_PACKAGE := ./cmd/$(BINARY_NAME)
-SERVER_PACKAGE := ./cmd/$(SERVER_BINARY)
 COVERAGE_FILE := coverage.out
 
 # Build info
@@ -35,12 +33,11 @@ setup:
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 	@echo "Setup complete! Edit .env file with your configuration."
 
-## build: Build all binaries
+## build: Build the binary
 build: clean
-	@echo "Building binaries..."
+	@echo "Building binary..."
 	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(BINARY_NAME) $(MAIN_PACKAGE)
-	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(SERVER_BINARY) $(SERVER_PACKAGE)
-	@echo "Built: bin/$(BINARY_NAME), bin/$(SERVER_BINARY)"
+	@echo "Built: bin/$(BINARY_NAME)"
 
 ## dev: Start development server with hot reload
 dev:
@@ -105,7 +102,7 @@ clean:
 ## server: Start HTTP server
 server: build
 	@echo "Starting HTTP server..."
-	./bin/$(SERVER_BINARY)
+	./bin/$(BINARY_NAME) server
 
 ## migrate-up: Apply database migrations
 migrate-up:
@@ -154,21 +151,17 @@ check: fmt lint test
 build-linux: clean
 	@echo "Building for Linux..."
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 $(MAIN_PACKAGE)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-linux-amd64 $(SERVER_PACKAGE)
 
 ## build-darwin: Cross-compile for macOS
 build-darwin: clean
 	@echo "Building for macOS..."
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 $(MAIN_PACKAGE)
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-darwin-amd64 $(SERVER_PACKAGE)
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 $(MAIN_PACKAGE)  
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-darwin-arm64 $(SERVER_PACKAGE)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 $(MAIN_PACKAGE)
 
 ## build-windows: Cross-compile for Windows
 build-windows: clean
 	@echo "Building for Windows..."
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PACKAGE)
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(SERVER_BINARY)-windows-amd64.exe $(SERVER_PACKAGE)
 
 ## release: Build release binaries for all platforms
 release: build-linux build-darwin build-windows

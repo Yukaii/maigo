@@ -23,7 +23,7 @@ Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused exper
 - ✅ **Minimal web UI** for OAuth2 completion only
 - ✅ **Production-ready architecture** with PostgreSQL and comprehensive testing
 
-**Current Status**: Phase 4 complete, ready for Phase 5 advanced features.
+**Current Status**: Phase 4 complete, ready for Phase 5 advanced features. Simplified to use single binary entry point.
 
 ## Project Overview
 Maigo is a **terminal-first URL shortener** built with Go, emphasizing a geek-focused experience with:
@@ -114,8 +114,7 @@ maigo config                             # Show configuration
 ```
 maigo/
 ├── cmd/
-│   ├── server/main.go           # HTTP server
-│   └── maigo/main.go            # CLI application
+│   └── maigo/main.go            # CLI application with server command
 ├── internal/
 │   ├── server/handlers/         # HTTP handlers (minimal OAuth2)
 │   ├── database/models/         # Data models
@@ -135,11 +134,11 @@ maigo/
 ```bash
 # Development workflow
 make dev          # Start development server with hot reload
-make build        # Build all binaries (server + CLI)
+make build        # Build the binary
 make test         # Run all tests with coverage
 
 # Server operations  
-make server       # Start HTTP server (port 8080)
+make server       # Start HTTP server (port 8080) using maigo server command
 
 
 # CLI testing
