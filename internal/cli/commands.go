@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
+	"github.com/yukaii/maigo/internal/database/models"
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/oauth"
 	"github.com/yukaii/maigo/internal/server"
@@ -385,39 +388,69 @@ func runLogin(cfg *config.Config, log *logger.Logger, username string) error {
 	return nil
 }
 
-// runRegister handles user registration using OAuth 2.0 flow
+// runRegister handles user registration using direct API call
 func runRegister(cfg *config.Config, log *logger.Logger, username, email string) error {
-	// For OAuth 2.0 flow, registration happens on the web interface
-	// The CLI will guide user to register through browser
-	
-	fmt.Printf("🔐 To register for Maigo, you'll need to complete registration in your browser.\n")
-	fmt.Printf("📧 Username: %s\n", username)
+	fmt.Printf("🔐 Creating account for Maigo\n")
+	fmt.Printf("� Username: %s\n", username)
 	fmt.Printf("📧 Email: %s\n", email)
 	fmt.Printf("\n")
 	
-	// Start OAuth flow - this will open browser where user can register
-	oauthClient := NewOAuthClient(cfg, log)
+	// Prompt for password
+	fmt.Printf("🔒 Please enter a password (minimum 6 characters): ")
 	
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // Longer timeout for registration
-	defer cancel()
-	
-	fmt.Printf("🌐 Opening browser for registration and authentication...\n")
-	
-	tokenResponse, err := oauthClient.PerformOAuthFlow(ctx)
-	if err != nil {
-		log.Error("OAuth registration flow failed", "username", username, "email", email, "error", err)
-		return fmt.Errorf("OAuth registration failed: %w", err)
+	var password string
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		// Use secure password input when running in a terminal
+		passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			fmt.Printf("\n❌ Failed to read password: %v\n", err)
+			return fmt.Errorf("failed to read password: %w", err)
+		}
+		password = string(passwordBytes)
+		fmt.Println() // Add newline after password input
+	} else {
+		// Fallback to regular input when not in a terminal (for testing/scripting)
+		fmt.Scanln(&password)
 	}
-
-	// Save tokens
+	
+	if len(password) < 6 {
+		fmt.Printf("❌ Password must be at least 6 characters long.\n")
+		return fmt.Errorf("password too short")
+	}
+	
+	// Create API client
 	client := NewAPIClient(cfg)
-	if err := client.SaveTokens(tokenResponse); err != nil {
-		log.Error("Failed to save tokens after registration", "error", err)
-		return fmt.Errorf("failed to save authentication tokens: %w", err)
+	
+	// Register user
+	fmt.Printf("📝 Creating account...\n")
+	response, err := client.Register(username, email, password)
+	if err != nil {
+		log.Error("Registration failed", "username", username, "email", email, "error", err)
+		return fmt.Errorf("registration failed: %w", err)
+	}
+	
+	// Extract tokens from response
+	if tokensInterface, ok := (*response)["tokens"]; ok {
+		if tokensMap, ok := tokensInterface.(map[string]interface{}); ok {
+			// Convert to TokenResponse structure
+			tokenResponse := &models.TokenResponse{
+				AccessToken:  tokensMap["access_token"].(string),
+				RefreshToken: tokensMap["refresh_token"].(string),
+				TokenType:    tokensMap["token_type"].(string),
+				ExpiresIn:    int(tokensMap["expires_in"].(float64)),
+			}
+			
+			// Save tokens
+			if err := client.SaveTokens(tokenResponse); err != nil {
+				log.Error("Failed to save tokens after registration", "error", err)
+				return fmt.Errorf("failed to save authentication tokens: %w", err)
+			}
+		}
 	}
 
-	log.Info("OAuth registration successful", "username", username, "email", email)
-	fmt.Printf("✅ Registration and authentication successful!\n")
+	log.Info("Registration successful", "username", username, "email", email)
+	fmt.Printf("✅ Registration successful!\n")
+	fmt.Printf("🎉 Welcome to Maigo, %s!\n", username)
 	fmt.Printf("📱 You can now use Maigo CLI commands.\n")
 	return nil
 }

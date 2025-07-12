@@ -206,6 +206,91 @@ func (s *Server) ProcessAuthorizationRequest(ctx context.Context, req *Authoriza
 	}, nil
 }
 
+// ProcessAuthorizationRequestWithUser processes OAuth 2.0 authorization request with a specific user ID
+func (s *Server) ProcessAuthorizationRequestWithUser(ctx context.Context, req *AuthorizationRequest, userID int64) (*AuthorizeResponse, error) {
+	// Validate response type
+	if req.ResponseType != ResponseTypeCode {
+		return nil, &TokenErrorResponse{
+			ErrorCode:        ErrorUnsupportedResponseType,
+			ErrorDescription: "Only 'code' response type is supported",
+		}
+	}
+
+	// Validate client
+	client, err := s.getClient(ctx, req.ClientID)
+	if err != nil {
+		return nil, &TokenErrorResponse{
+			ErrorCode:        ErrorInvalidClient,
+			ErrorDescription: "Invalid client_id",
+		}
+	}
+
+	// Validate redirect URI
+	if !s.validateRedirectURI(client, req.RedirectURI) {
+		return nil, &TokenErrorResponse{
+			ErrorCode:        ErrorInvalidRequest,
+			ErrorDescription: "Invalid redirect_uri",
+		}
+	}
+
+	// Validate PKCE parameters if present
+	if req.CodeChallenge != "" {
+		if err := ValidateCodeChallenge(req.CodeChallenge); err != nil {
+			return nil, &TokenErrorResponse{
+				ErrorCode:        ErrorInvalidRequest,
+				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
+			}
+		}
+
+		// Default to plain if method not specified
+		if req.CodeChallengeMethod == "" {
+			req.CodeChallengeMethod = PKCEMethodPlain
+		}
+
+		if err := ValidateCodeChallengeMethod(req.CodeChallengeMethod); err != nil {
+			return nil, &TokenErrorResponse{
+				ErrorCode:        ErrorInvalidRequest,
+				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
+			}
+		}
+	}
+
+	// Generate authorization code
+	authCode, err := GenerateAuthorizationCode()
+	if err != nil {
+		return nil, &TokenErrorResponse{
+			ErrorCode:        ErrorServerError,
+			ErrorDescription: "Failed to generate authorization code",
+		}
+	}
+
+	// Store authorization code with PKCE parameters and the provided user ID
+	expiresAt := time.Now().Add(10 * time.Minute) // 10 minute expiry
+	err = s.storeAuthorizationCodeWithUser(ctx, &models.AuthorizationCode{
+		Code:                authCode,
+		ClientID:           req.ClientID,
+		UserID:             userID,
+		RedirectURI:        req.RedirectURI,
+		Scope:              req.Scope,
+		CodeChallenge:      req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		ExpiresAt:          expiresAt,
+		Used:               false,
+	})
+
+	if err != nil {
+		return nil, &TokenErrorResponse{
+			ErrorCode:        ErrorServerError,
+			ErrorDescription: "Failed to store authorization code",
+		}
+	}
+
+	return &AuthorizeResponse{
+		Code:  authCode,
+		State: req.State,
+	}, nil
+}
+
 // ProcessTokenRequest processes OAuth 2.0 token request with PKCE verification
 func (s *Server) ProcessTokenRequest(ctx context.Context, req *TokenRequest) (*TokenPair, error) {
 	switch req.GrantType {
@@ -595,6 +680,28 @@ func (s *Server) storeAuthorizationCode(ctx context.Context, authCode *models.Au
 		authCode.Code,
 		authCode.ClientID,
 		userID,
+		authCode.RedirectURI,
+		authCode.Scope,
+		authCode.CodeChallenge,
+		authCode.CodeChallengeMethod,
+		authCode.ExpiresAt,
+		authCode.Used,
+	)
+
+	return err
+}
+
+// storeAuthorizationCodeWithUser stores authorization code with PKCE parameters and specific user ID
+func (s *Server) storeAuthorizationCodeWithUser(ctx context.Context, authCode *models.AuthorizationCode) error {
+	query := `
+		INSERT INTO authorization_codes 
+		(code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, expires_at, used, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`
+
+	_, err := s.db.Exec(ctx, query,
+		authCode.Code,
+		authCode.ClientID,
+		authCode.UserID, // Use the provided user ID instead of hardcoding
 		authCode.RedirectURI,
 		authCode.Scope,
 		authCode.CodeChallenge,
