@@ -14,6 +14,14 @@ import (
 	"log/slog"
 )
 
+// Default CLI client constants - must match CLI package constants
+const (
+	DefaultCLIClientID     = "maigo-cli"
+	DefaultCLIClientSecret = "cli-client-secret-not-used-with-pkce"
+	DefaultCLIClientName   = "Maigo CLI Application"
+	DefaultCLIRedirectURI  = "http://localhost:8000/callback"
+)
+
 // Server handles OAuth2 operations
 type Server struct {
 	db     *pgxpool.Pool
@@ -669,26 +677,33 @@ func (s *Server) getUserByUsernameOrEmail(ctx context.Context, usernameOrEmail s
 
 // EnsureDefaultOAuthClient creates default CLI client if it doesn't exist
 func (s *Server) EnsureDefaultOAuthClient(ctx context.Context) error {
-	clientID := "maigo-cli"
-
 	// Check if client already exists
-	_, err := s.getClient(ctx, clientID)
+	_, err := s.getClient(ctx, DefaultCLIClientID)
 	if err == nil {
 		// Client already exists
 		return nil
 	}
 
-	// Create default CLI client
+	// Create default CLI client with all required fields
 	query := `
-		INSERT INTO oauth_clients (id, name, redirect_uri, created_at)
-		VALUES ($1, $2, $3, NOW())
-		ON CONFLICT (id) DO NOTHING`
+		INSERT INTO oauth_clients (id, secret, name, redirect_uri, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			secret = EXCLUDED.secret,
+			name = EXCLUDED.name,
+			redirect_uri = EXCLUDED.redirect_uri`
 
 	_, err = s.db.Exec(ctx, query,
-		clientID,
-		"Maigo CLI",
-		"http://localhost:8000/callback", // Default callback for CLI
+		DefaultCLIClientID,
+		DefaultCLIClientSecret,
+		DefaultCLIClientName,
+		DefaultCLIRedirectURI,
 	)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create default CLI client: %w", err)
+	}
+
+	s.logger.Info("Created default CLI OAuth client", "client_id", DefaultCLIClientID)
+	return nil
 }

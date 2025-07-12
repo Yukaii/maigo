@@ -20,6 +20,14 @@ import (
 	"github.com/yukaii/maigo/internal/oauth"
 )
 
+// CLI OAuth client constants - hardcoded for consistency
+// These must match the constants in internal/oauth/server.go
+const (
+	CLIClientID     = "maigo-cli"
+	CLIClientSecret = "cli-client-secret-not-used-with-pkce" // Not used with PKCE but kept for completeness
+	CLIRedirectURI  = "http://localhost:8000/callback"
+)
+
 // OAuthClient handles OAuth 2.0 flow for CLI applications
 type OAuthClient struct {
 	config      *config.Config
@@ -43,8 +51,8 @@ func NewOAuthClient(cfg *config.Config, log *logger.Logger) *OAuthClient {
 	return &OAuthClient{
 		config:      cfg,
 		logger:      log,
-		clientID:    "maigo-cli",
-		redirectURI: "http://localhost:8000/callback",
+		clientID:    CLIClientID,
+		redirectURI: CLIRedirectURI,
 		baseURL:     fmt.Sprintf("http://localhost:%d", cfg.Server.Port),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,

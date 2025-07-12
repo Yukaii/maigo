@@ -13,6 +13,7 @@ import (
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/oauth"
 	"github.com/yukaii/maigo/internal/server"
 )
 
@@ -242,6 +243,16 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 	defer db.Close()
 
 	log.Info("Connected to database", "host", cfg.Database.Host, "port", cfg.Database.Port)
+
+	// Initialize OAuth server and ensure CLI client exists
+	oauthServer := oauth.NewServer(db, cfg, log.Logger)
+	
+	ctx := context.Background()
+	if err := oauthServer.EnsureDefaultOAuthClient(ctx); err != nil {
+		log.Error("Failed to ensure default OAuth client exists", "error", err)
+		return fmt.Errorf("failed to initialize OAuth client: %w", err)
+	}
+	log.Info("OAuth CLI client initialized successfully")
 
 	// Initialize HTTP server
 	httpServer := server.NewHTTPServer(cfg, db, log)
