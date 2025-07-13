@@ -89,7 +89,12 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 	if err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
-	defer server.Shutdown(ctx)
+	defer func() {
+		if err := server.Shutdown(ctx); err != nil {
+			// Log the error but don't fail the main operation
+			fmt.Printf("Warning: failed to shutdown callback server: %v\n", err)
+		}
+	}()
 
 	// Step 4: Build authorization URL
 	authURL, err := c.buildAuthorizationURL(pkce, state)
@@ -491,7 +496,9 @@ func (c *OAuthClient) handleCallback(w http.ResponseWriter, r *http.Request, cal
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(htmlContent))
+	if _, err := w.Write([]byte(htmlContent)); err != nil {
+		fmt.Printf("Warning: failed to write response: %v\n", err)
+	}
 }
 
 // exchangeCodeForTokens exchanges authorization code for access tokens

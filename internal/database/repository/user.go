@@ -193,7 +193,7 @@ func (r *UserRepository) Update(ctx context.Context, id int64, updates map[strin
 		UPDATE users
 		SET %s
 		WHERE id = $%d`,
-		fmt.Sprintf("%s", setParts[0]), argIndex)
+		setParts[0], argIndex)
 
 	for i := 1; i < len(setParts); i++ {
 		query = fmt.Sprintf("%s, %s", query, setParts[i])

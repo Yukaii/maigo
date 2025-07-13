@@ -194,7 +194,11 @@ func NewDeleteCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 			if !force {
 				fmt.Printf("Are you sure you want to delete short URL '%s'? (y/N): ", args[0])
 				var response string
-				fmt.Scanln(&response)
+				_, err := fmt.Scanln(&response)
+				if err != nil {
+					fmt.Println("❌ Error reading input. Deletion cancelled.")
+					return nil
+				}
 				if response != "y" && response != "Y" && response != "yes" {
 					fmt.Println("❌ Deletion cancelled.")
 					return nil
@@ -468,7 +472,10 @@ func runRegister(cfg *config.Config, log *logger.Logger, username, email string)
 		fmt.Println() // Add newline after password input
 	} else {
 		// Fallback to regular input when not in a terminal (for testing/scripting)
-		fmt.Scanln(&password)
+		_, err := fmt.Scanln(&password)
+		if err != nil {
+			return fmt.Errorf("failed to read password: %w", err)
+		}
 	}
 
 	if len(password) < 6 {

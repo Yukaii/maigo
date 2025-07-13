@@ -489,7 +489,11 @@ func (suite *IntegrationTestSuite) TestDatabaseConnection() {
 	// Test transaction
 	tx, err := suite.db.Begin(context.Background())
 	require.NoError(suite.T(), err)
-	defer tx.Rollback(context.Background())
+	defer func() {
+		if err := tx.Rollback(context.Background()); err != nil {
+			suite.T().Logf("Warning: failed to rollback transaction: %v", err)
+		}
+	}()
 
 	var result int
 	err = tx.QueryRow(context.Background(), "SELECT 1").Scan(&result)
