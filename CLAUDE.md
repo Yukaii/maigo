@@ -454,8 +454,6 @@ Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused exper
 
 ## Summary
 
-## Summary
-
 Maigo is a **terminal-first URL shortener** with **production-ready OAuth 2.0 authentication**:
 
 - ✅ **Standards-Compliant OAuth 2.0** - RFC 6749 & RFC 7636 (PKCE) implementation
