@@ -4,10 +4,6 @@ run:
   tests: true
   modules-download-mode: readonly
   go: '1.23'
-  skip-dirs:
-    - vendor
-  skip-files:
-    - ".*\\.pb\\.go"
 
 output:
   formats:
@@ -17,7 +13,10 @@ output:
 
 linters-settings:
   gci:
-    local-prefixes: github.com/yukaii/maigo
+    sections:
+      - standard
+      - default
+      - prefix(github.com/yukaii/maigo)
   
   gofmt:
     simplify: true
@@ -39,8 +38,7 @@ linters-settings:
   staticcheck:
     checks: ["all"]
   
-  unused:
-    check-exported: false
+  unused: {}
   
   errcheck:
     check-type-assertions: true
@@ -150,6 +148,11 @@ issues:
     
     # Exclude generated files
     - path: ".*\\.pb\\.go"
+      linters:
+        - all
+    
+    # Exclude vendor directory
+    - path: vendor/
       linters:
         - all
   
