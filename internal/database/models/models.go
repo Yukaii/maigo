@@ -59,12 +59,12 @@ type AccessToken struct {
 
 // Domain represents a custom domain
 type Domain struct {
-	ID       int64     `json:"id" db:"id"`
-	Domain   string    `json:"domain" db:"domain" validate:"required,fqdn"`
-	UserID   int64     `json:"user_id" db:"user_id" validate:"required"`
-	SSLCert  *string   `json:"-" db:"ssl_cert"`
-	SSLKey   *string   `json:"-" db:"ssl_key"`
-	Verified bool      `json:"verified" db:"verified"`
+	ID        int64     `json:"id" db:"id"`
+	Domain    string    `json:"domain" db:"domain" validate:"required,fqdn"`
+	UserID    int64     `json:"user_id" db:"user_id" validate:"required"`
+	SSLCert   *string   `json:"-" db:"ssl_cert"`
+	SSLKey    *string   `json:"-" db:"ssl_key"`
+	Verified  bool      `json:"verified" db:"verified"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 

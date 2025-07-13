@@ -11,13 +11,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/database/models"
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/oauth"
 	"github.com/yukaii/maigo/internal/server"
+	"golang.org/x/term"
 )
 
 // NewServerCommand creates the server command
@@ -307,7 +307,7 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 
 	// Initialize OAuth server and ensure CLI client exists
 	oauthServer := oauth.NewServer(db, cfg, log.Logger)
-	
+
 	ctx := context.Background()
 	if err := oauthServer.EnsureDefaultOAuthClient(ctx); err != nil {
 		log.Error("Failed to ensure default OAuth client exists", "error", err)
@@ -410,24 +410,24 @@ func showMigrationStatus(cfg *config.Config, log *logger.Logger) error {
 // runLogin handles user login using OAuth 2.0 flow
 func runLogin(cfg *config.Config, log *logger.Logger, username string) error {
 	client := NewAPIClient(cfg)
-	
+
 	// Check if already authenticated
 	tokens, err := client.LoadTokens()
 	if err == nil && tokens != nil && !client.IsTokenExpired(tokens) {
-		fmt.Printf("✅ Already authenticated as user (expires in %d minutes)\n", 
+		fmt.Printf("✅ Already authenticated as user (expires in %d minutes)\n",
 			(tokens.ExpiresAt-time.Now().Unix())/60)
 		return nil
 	}
 
 	// Create OAuth client
 	oauthClient := NewOAuthClient(cfg, log)
-	
+
 	// Perform OAuth 2.0 flow
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	
+
 	fmt.Printf("🔐 Starting OAuth 2.0 authentication for user: %s\n", username)
-	
+
 	tokenResponse, err := oauthClient.PerformOAuthFlow(ctx)
 	if err != nil {
 		log.Error("OAuth flow failed", "username", username, "error", err)
@@ -452,10 +452,10 @@ func runRegister(cfg *config.Config, log *logger.Logger, username, email string)
 	fmt.Printf("� Username: %s\n", username)
 	fmt.Printf("📧 Email: %s\n", email)
 	fmt.Printf("\n")
-	
+
 	// Prompt for password
 	fmt.Printf("🔒 Please enter a password (minimum 6 characters): ")
-	
+
 	var password string
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		// Use secure password input when running in a terminal
@@ -470,15 +470,15 @@ func runRegister(cfg *config.Config, log *logger.Logger, username, email string)
 		// Fallback to regular input when not in a terminal (for testing/scripting)
 		fmt.Scanln(&password)
 	}
-	
+
 	if len(password) < 6 {
 		fmt.Printf("❌ Password must be at least 6 characters long.\n")
 		return fmt.Errorf("password too short")
 	}
-	
+
 	// Create API client
 	client := NewAPIClient(cfg)
-	
+
 	// Register user
 	fmt.Printf("📝 Creating account...\n")
 	response, err := client.Register(username, email, password)
@@ -486,7 +486,7 @@ func runRegister(cfg *config.Config, log *logger.Logger, username, email string)
 		log.Error("Registration failed", "username", username, "email", email, "error", err)
 		return fmt.Errorf("registration failed: %w", err)
 	}
-	
+
 	// Extract tokens from response
 	if tokensInterface, ok := (*response)["tokens"]; ok {
 		if tokensMap, ok := tokensInterface.(map[string]interface{}); ok {
@@ -497,7 +497,7 @@ func runRegister(cfg *config.Config, log *logger.Logger, username, email string)
 				TokenType:    tokensMap["token_type"].(string),
 				ExpiresIn:    int(tokensMap["expires_in"].(float64)),
 			}
-			
+
 			// Save tokens
 			if err := client.SaveTokens(tokenResponse); err != nil {
 				log.Error("Failed to save tokens after registration", "error", err)
@@ -546,7 +546,7 @@ func runAuthStatus(cfg *config.Config, log *logger.Logger) error {
 
 	fmt.Printf("✅ Authenticated\n")
 	fmt.Printf("Token Type: %s\n", tokens.TokenType)
-	
+
 	if client.IsTokenExpired(tokens) {
 		fmt.Printf("❌ Token Status: Expired\n")
 		if tokens.RefreshToken != "" {
@@ -574,7 +574,7 @@ func runCreateShortURL(cfg *config.Config, log *logger.Logger, url, custom strin
 	}
 
 	log.Info("Short URL created successfully")
-	
+
 	// Display result
 	fmt.Printf("✅ Short URL created successfully!\n\n")
 	fmt.Printf("Original URL: %s\n", (*response)["url"])
@@ -610,7 +610,7 @@ func runListURLs(cfg *config.Config, log *logger.Logger, page, pageSize int) err
 	}
 
 	// Display results
-	fmt.Printf("📋 Your Short URLs (Page %d of %d)\n\n", 
+	fmt.Printf("📋 Your Short URLs (Page %d of %d)\n\n",
 		response.Pagination.Page, response.Pagination.Pages)
 
 	for i, url := range response.URLs {
@@ -659,7 +659,7 @@ func runGetURL(cfg *config.Config, log *logger.Logger, shortCode string) error {
 	fmt.Printf("Short URL:    %s\n", (*response)["short_url"])
 	fmt.Printf("Hits:         %v\n", (*response)["hits"])
 	fmt.Printf("Created:      %s\n", (*response)["created_at"])
-	
+
 	if updatedAt, ok := (*response)["updated_at"]; ok && updatedAt != nil {
 		fmt.Printf("Last Hit:     %s\n", updatedAt)
 	}
@@ -683,7 +683,7 @@ func runGetURLStats(cfg *config.Config, log *logger.Logger, shortCode string) er
 	fmt.Printf("Target URL:   %s\n", (*response)["url"])
 	fmt.Printf("Total Hits:   %v\n", (*response)["hits"])
 	fmt.Printf("Created:      %s\n", (*response)["created_at"])
-	
+
 	if lastHit, ok := (*response)["last_hit"]; ok && lastHit != nil {
 		fmt.Printf("Last Hit:     %s\n", lastHit)
 	} else {

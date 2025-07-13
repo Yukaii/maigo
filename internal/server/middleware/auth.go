@@ -14,7 +14,7 @@ func Auth(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Debug log
 		c.Header("X-Debug-Auth", "called")
-		
+
 		// Get authorization header
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {

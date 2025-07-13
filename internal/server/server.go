@@ -31,9 +31,9 @@ func NewHTTPServer(cfg *config.Config, db *pgxpool.Pool, log *logger.Logger) *HT
 	engine := gin.New()
 
 	// Load HTML templates from embedded filesystem
-	templ := template.Must(template.New("").ParseFS(templatesFS, 
+	templ := template.Must(template.New("").ParseFS(templatesFS,
 		"templates/layouts/*.tmpl",
-		"templates/styles/*.css", 
+		"templates/styles/*.css",
 		"templates/oauth/*.tmpl"))
 	engine.SetHTMLTemplate(templ)
 

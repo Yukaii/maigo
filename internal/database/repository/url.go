@@ -172,7 +172,7 @@ func (r *URLRepository) Update(ctx context.Context, id int64, updates map[string
 	query := fmt.Sprintf(`
 		UPDATE urls
 		SET %s
-		WHERE id = $%d`, 
+		WHERE id = $%d`,
 		setParts[0], argIndex)
 
 	for i := 1; i < len(setParts); i++ {
@@ -190,7 +190,7 @@ func (r *URLRepository) Update(ctx context.Context, id int64, updates map[string
 // Delete deletes a URL
 func (r *URLRepository) Delete(ctx context.Context, id int64) error {
 	query := `DELETE FROM urls WHERE id = $1`
-	
+
 	result, err := r.db.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete URL: %w", err)
@@ -206,7 +206,7 @@ func (r *URLRepository) Delete(ctx context.Context, id int64) error {
 // DeleteByUserAndID deletes a URL owned by a specific user
 func (r *URLRepository) DeleteByUserAndID(ctx context.Context, userID, urlID int64) error {
 	query := `DELETE FROM urls WHERE id = $1 AND user_id = $2`
-	
+
 	result, err := r.db.Exec(ctx, query, urlID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to delete URL: %w", err)

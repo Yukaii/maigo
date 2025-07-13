@@ -38,7 +38,7 @@ func NewLogger(config Config) *Logger {
 
 	var handler slog.Handler
 	opts := &slog.HandlerOptions{
-		Level: level,
+		Level:     level,
 		AddSource: true,
 	}
 
@@ -55,7 +55,7 @@ func NewLogger(config Config) *Logger {
 			TimeFormat:      "15:04:05",
 		})
 		charmLogger.SetLevel(logLevelToCharm(level))
-		
+
 		// Create a wrapper that implements slog.Handler interface
 		handler = &charmHandler{logger: charmLogger}
 	}
@@ -91,7 +91,7 @@ func (h *charmHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 func (h *charmHandler) Handle(ctx context.Context, record slog.Record) error {
 	level := logLevelToCharm(record.Level)
-	
+
 	// Build key-value pairs
 	var keyvals []interface{}
 	record.Attrs(func(attr slog.Attr) bool {

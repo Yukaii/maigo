@@ -1,0 +1,159 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: readonly
+  go: '1.23'
+  skip-dirs:
+    - vendor
+  skip-files:
+    - ".*\\.pb\\.go"
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  gci:
+    local-prefixes: github.com/yukaii/maigo
+  
+  gofmt:
+    simplify: true
+  
+  goimports:
+    local-prefixes: github.com/yukaii/maigo
+  
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  
+  misspell:
+    locale: US
+  
+  revive:
+    confidence: 0.8
+  
+  staticcheck:
+    checks: ["all"]
+  
+  unused:
+    check-exported: false
+  
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  gosec:
+    excludes:
+      - G104 # Audit errors not checked
+      - G204 # Subprocess launched with function call as argument
+  
+  cyclop:
+    max-complexity: 15
+  
+  dupl:
+    threshold: 100
+  
+  funlen:
+    lines: 80
+    statements: 50
+  
+  gocognit:
+    min-complexity: 20
+  
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - wrapperFunc
+  
+  lll:
+    line-length: 120
+  
+  nakedret:
+    max-func-lines: 30
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gosec
+    - bodyclose
+    - cyclop
+    - dupl
+    - errname
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - misspell
+    - nakedret
+    - revive
+    - stylecheck
+    - unconvert
+    - unparam
+    - gci
+    - funlen
+    - lll
+  
+  disable:
+    - exhaustruct
+    - gochecknoglobals
+    - gochecknoinits
+    - godox
+    - nlreturn
+    - paralleltest
+    - testpackage
+    - wsl
+    - varnamelen
+    - wrapcheck
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - funlen
+        - gocognit
+        - goconst
+        - dupl
+        - lll
+    
+    # Exclude some linters from running on main.go
+    - path: cmd/
+      linters:
+        - gochecknoinits
+    
+    # Exclude some linters from migration files
+    - path: internal/database/migrations/
+      linters:
+        - lll
+        - goconst
+    
+    # Exclude generated files
+    - path: ".*\\.pb\\.go"
+      linters:
+        - all
+  
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false

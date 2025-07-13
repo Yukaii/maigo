@@ -13,10 +13,10 @@ import (
 
 // AuthHandler handles authentication operations
 type AuthHandler struct {
-	db           *pgxpool.Pool
-	config       *config.Config
-	logger       *logger.Logger
-	oauthServer  *oauth.Server
+	db          *pgxpool.Pool
+	config      *config.Config
+	logger      *logger.Logger
+	oauthServer *oauth.Server
 }
 
 // NewAuthHandler creates a new auth handler

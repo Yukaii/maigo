@@ -33,7 +33,7 @@ type TokenData struct {
 func NewAPIClient(cfg *config.Config) *APIClient {
 	// Get token path
 	tokenPath := getTokenPath()
-	
+
 	return &APIClient{
 		BaseURL: fmt.Sprintf("http://localhost:%d", cfg.Server.Port),
 		HTTPClient: &http.Client{
@@ -49,12 +49,12 @@ func getTokenPath() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 		return filepath.Join(xdgConfig, "maigo", "tokens.json")
 	}
-	
+
 	// Fall back to ~/.config
 	if home := os.Getenv("HOME"); home != "" {
 		return filepath.Join(home, ".config", "maigo", "tokens.json")
 	}
-	
+
 	// Fall back to current directory
 	return "tokens.json"
 }
@@ -237,7 +237,7 @@ func (c *APIClient) GetUserURLs(page, pageSize int) (*models.URLListResponse, er
 	}
 
 	url := fmt.Sprintf("/api/v1/user/urls?page=%d&page_size=%d", page, pageSize)
-	
+
 	var response models.URLListResponse
 	err = c.makeRequest("GET", url, nil, &response, token)
 	if err != nil {
@@ -255,7 +255,7 @@ func (c *APIClient) DeleteURL(shortCode string) error {
 	}
 
 	url := fmt.Sprintf("/api/v1/urls/%s", shortCode)
-	
+
 	var response map[string]interface{}
 	err = c.makeRequest("DELETE", url, nil, &response, token)
 	if err != nil {
@@ -273,7 +273,7 @@ func (c *APIClient) GetURL(shortCode string) (*map[string]interface{}, error) {
 	}
 
 	url := fmt.Sprintf("/api/v1/urls/%s", shortCode)
-	
+
 	var response map[string]interface{}
 	err = c.makeRequest("GET", url, nil, &response, token)
 	if err != nil {
@@ -291,7 +291,7 @@ func (c *APIClient) GetURLStats(shortCode string) (*map[string]interface{}, erro
 	}
 
 	url := fmt.Sprintf("/api/v1/urls/%s/stats", shortCode)
-	
+
 	var response map[string]interface{}
 	err = c.makeRequest("GET", url, nil, &response, token)
 	if err != nil {

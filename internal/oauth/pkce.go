@@ -20,10 +20,10 @@ const (
 	PKCEMethodS256 = "S256"
 	// PKCEMethodPlain uses plain text for code challenge (not recommended)
 	PKCEMethodPlain = "plain"
-	
+
 	// CodeVerifierMinLength minimum length for code verifier
 	CodeVerifierMinLength = 43
-	// CodeVerifierMaxLength maximum length for code verifier  
+	// CodeVerifierMaxLength maximum length for code verifier
 	CodeVerifierMaxLength = 128
 )
 
@@ -34,13 +34,13 @@ func GeneratePKCEParams() (*PKCEParams, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate code verifier: %w", err)
 	}
-	
+
 	// Create code challenge using S256 method
 	codeChallenge, err := createCodeChallenge(codeVerifier, PKCEMethodS256)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create code challenge: %w", err)
 	}
-	
+
 	return &PKCEParams{
 		CodeVerifier:        codeVerifier,
 		CodeChallenge:       codeChallenge,
@@ -57,16 +57,16 @@ func generateCodeVerifier() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to generate random bytes: %w", err)
 	}
-	
+
 	// Base64url encode to create URL-safe string
 	codeVerifier := base64.RawURLEncoding.EncodeToString(randomBytes)
-	
+
 	// Ensure length is within RFC 7636 requirements
 	if len(codeVerifier) < CodeVerifierMinLength || len(codeVerifier) > CodeVerifierMaxLength {
 		return "", fmt.Errorf("generated code verifier length %d is outside valid range [%d, %d]",
 			len(codeVerifier), CodeVerifierMinLength, CodeVerifierMaxLength)
 	}
-	
+
 	return codeVerifier, nil
 }
 
@@ -77,11 +77,11 @@ func createCodeChallenge(codeVerifier, method string) (string, error) {
 		// SHA256 hash the code verifier and base64url encode
 		hash := sha256.Sum256([]byte(codeVerifier))
 		return base64.RawURLEncoding.EncodeToString(hash[:]), nil
-		
+
 	case PKCEMethodPlain:
 		// Plain method: code challenge = code verifier
 		return codeVerifier, nil
-		
+
 	default:
 		return "", fmt.Errorf("unsupported code challenge method: %s", method)
 	}
@@ -92,13 +92,13 @@ func VerifyCodeChallenge(codeVerifier, codeChallenge, method string) bool {
 	if codeVerifier == "" || codeChallenge == "" {
 		return false
 	}
-	
+
 	// Recreate code challenge from verifier
 	computedChallenge, err := createCodeChallenge(codeVerifier, method)
 	if err != nil {
 		return false
 	}
-	
+
 	// Compare with stored challenge
 	return computedChallenge == codeChallenge
 }
@@ -108,18 +108,18 @@ func ValidateCodeVerifier(codeVerifier string) error {
 	if len(codeVerifier) < CodeVerifierMinLength {
 		return fmt.Errorf("code verifier too short: %d < %d", len(codeVerifier), CodeVerifierMinLength)
 	}
-	
+
 	if len(codeVerifier) > CodeVerifierMaxLength {
 		return fmt.Errorf("code verifier too long: %d > %d", len(codeVerifier), CodeVerifierMaxLength)
 	}
-	
+
 	// Check if contains only unreserved characters: A-Z / a-z / 0-9 / "-" / "." / "_" / "~"
 	for _, char := range codeVerifier {
 		if !isUnreservedChar(char) {
 			return fmt.Errorf("code verifier contains invalid character: %c", char)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -128,18 +128,18 @@ func ValidateCodeChallenge(codeChallenge string) error {
 	if len(codeChallenge) < CodeVerifierMinLength {
 		return fmt.Errorf("code challenge too short: %d < %d", len(codeChallenge), CodeVerifierMinLength)
 	}
-	
+
 	if len(codeChallenge) > CodeVerifierMaxLength {
 		return fmt.Errorf("code challenge too long: %d > %d", len(codeChallenge), CodeVerifierMaxLength)
 	}
-	
+
 	// Check if contains only unreserved characters
 	for _, char := range codeChallenge {
 		if !isUnreservedChar(char) {
 			return fmt.Errorf("code challenge contains invalid character: %c", char)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -172,7 +172,7 @@ func GenerateAuthorizationCode() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to generate authorization code: %w", err)
 	}
-	
+
 	// Base64url encode for URL safety
 	return base64.RawURLEncoding.EncodeToString(randomBytes), nil
 }
@@ -182,16 +182,16 @@ func ValidateRedirectURI(redirectURI string) error {
 	if redirectURI == "" {
 		return fmt.Errorf("redirect URI is required")
 	}
-	
+
 	// Must be absolute URI
 	if !strings.HasPrefix(redirectURI, "http://") && !strings.HasPrefix(redirectURI, "https://") {
 		return fmt.Errorf("redirect URI must be absolute (http:// or https://)")
 	}
-	
+
 	// Should not contain fragment
 	if strings.Contains(redirectURI, "#") {
 		return fmt.Errorf("redirect URI must not contain fragment")
 	}
-	
+
 	return nil
 }

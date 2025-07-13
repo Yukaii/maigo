@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database/models"
-	"log/slog"
 )
 
 // Default CLI client constants - must match CLI package constants
@@ -57,7 +58,7 @@ type TokenPair struct {
 
 // AuthorizationRequest represents an OAuth 2.0 authorization request
 type AuthorizationRequest struct {
-	ResponseType         string `form:"response_type" binding:"required"`
+	ResponseType        string `form:"response_type" binding:"required"`
 	ClientID            string `form:"client_id" binding:"required"`
 	RedirectURI         string `form:"redirect_uri" binding:"required"`
 	Scope               string `form:"scope"`
@@ -112,14 +113,14 @@ const (
 const (
 	ErrorInvalidRequest          = "invalid_request"
 	ErrorUnauthorizedClient      = "unauthorized_client"
-	ErrorAccessDenied           = "access_denied"
+	ErrorAccessDenied            = "access_denied"
 	ErrorUnsupportedResponseType = "unsupported_response_type"
-	ErrorInvalidScope           = "invalid_scope"
-	ErrorServerError            = "server_error"
-	ErrorTemporarilyUnavailable = "temporarily_unavailable"
-	ErrorInvalidClient          = "invalid_client"
-	ErrorInvalidGrant           = "invalid_grant"
-	ErrorUnsupportedGrantType   = "unsupported_grant_type"
+	ErrorInvalidScope            = "invalid_scope"
+	ErrorServerError             = "server_error"
+	ErrorTemporarilyUnavailable  = "temporarily_unavailable"
+	ErrorInvalidClient           = "invalid_client"
+	ErrorInvalidGrant            = "invalid_grant"
+	ErrorUnsupportedGrantType    = "unsupported_grant_type"
 )
 
 // ProcessAuthorizationRequest processes OAuth 2.0 authorization request with PKCE
@@ -184,13 +185,13 @@ func (s *Server) ProcessAuthorizationRequest(ctx context.Context, req *Authoriza
 	expiresAt := time.Now().Add(10 * time.Minute) // 10 minute expiry
 	err = s.storeAuthorizationCode(ctx, &models.AuthorizationCode{
 		Code:                authCode,
-		ClientID:           req.ClientID,
-		RedirectURI:        req.RedirectURI,
-		Scope:              req.Scope,
-		CodeChallenge:      req.CodeChallenge,
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               req.Scope,
+		CodeChallenge:       req.CodeChallenge,
 		CodeChallengeMethod: req.CodeChallengeMethod,
-		ExpiresAt:          expiresAt,
-		Used:               false,
+		ExpiresAt:           expiresAt,
+		Used:                false,
 	})
 
 	if err != nil {
@@ -268,14 +269,14 @@ func (s *Server) ProcessAuthorizationRequestWithUser(ctx context.Context, req *A
 	expiresAt := time.Now().Add(10 * time.Minute) // 10 minute expiry
 	err = s.storeAuthorizationCodeWithUser(ctx, &models.AuthorizationCode{
 		Code:                authCode,
-		ClientID:           req.ClientID,
-		UserID:             userID,
-		RedirectURI:        req.RedirectURI,
-		Scope:              req.Scope,
-		CodeChallenge:      req.CodeChallenge,
+		ClientID:            req.ClientID,
+		UserID:              userID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               req.Scope,
+		CodeChallenge:       req.CodeChallenge,
 		CodeChallengeMethod: req.CodeChallengeMethod,
-		ExpiresAt:          expiresAt,
-		Used:               false,
+		ExpiresAt:           expiresAt,
+		Used:                false,
 	})
 
 	if err != nil {
@@ -619,14 +620,14 @@ func (s *Server) RegisterUser(ctx context.Context, username, email, password str
 
 // RevokeToken revokes all tokens for a user
 func (s *Server) RevokeToken(ctx context.Context, userID int64) error {
-	// In a production system, you would maintain a token blacklist or 
+	// In a production system, you would maintain a token blacklist or
 	// token revocation table. For now, this is a no-op since we're using
 	// stateless JWT tokens.
 	// You could:
 	// 1. Add tokens to a blacklist table
 	// 2. Change the user's token version/salt
 	// 3. Set token expiration in a cache
-	
+
 	s.logger.Info("Token revocation requested for user", "user_id", userID)
 	return nil
 }

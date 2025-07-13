@@ -192,7 +192,7 @@ func (r *UserRepository) Update(ctx context.Context, id int64, updates map[strin
 	query := fmt.Sprintf(`
 		UPDATE users
 		SET %s
-		WHERE id = $%d`, 
+		WHERE id = $%d`,
 		fmt.Sprintf("%s", setParts[0]), argIndex)
 
 	for i := 1; i < len(setParts); i++ {
@@ -210,7 +210,7 @@ func (r *UserRepository) Update(ctx context.Context, id int64, updates map[strin
 // Delete deletes a user
 func (r *UserRepository) Delete(ctx context.Context, id int64) error {
 	query := `DELETE FROM users WHERE id = $1`
-	
+
 	result, err := r.db.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)

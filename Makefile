@@ -31,6 +31,7 @@ setup:
 	go install github.com/air-verse/air@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	go install golang.org/x/tools/cmd/goimports@latest
 	@echo "Setup complete! Edit .env file with your configuration."
 
 ## build: Build the binary
@@ -82,13 +83,34 @@ benchmark:
 ## lint: Run linter
 lint:
 	@echo "Running linter..."
+	golangci-lint run --no-config --disable-all -E errcheck -E gosimple -E govet -E ineffassign -E unused -E gofmt -E goimports -E misspell ./...
+
+## lint-full: Run full linter with config
+lint-full:
+	@echo "Running full linter..."
 	golangci-lint run
+
+## lint-fix: Run linter with auto-fix
+lint-fix:
+	@echo "Running linter with auto-fix..."
+	golangci-lint run --no-config --disable-all -E errcheck -E gosimple -E govet -E ineffassign -E unused -E gofmt -E goimports -E misspell --fix ./...
 
 ## fmt: Format code
 fmt:
 	@echo "Formatting code..."
-	go fmt ./...
+	gofmt -s -w .
+	goimports -w .
 	go mod tidy
+
+## fmt-check: Check if code is formatted
+fmt-check:
+	@echo "Checking code formatting..."
+	@if [ "$$(gofmt -s -l . | wc -l)" -gt 0 ]; then \
+		echo "Code is not formatted. Run 'make fmt' to fix."; \
+		gofmt -s -l .; \
+		exit 1; \
+	fi
+	@echo "Code is properly formatted."
 
 ## clean: Clean build artifacts
 clean:
@@ -142,10 +164,14 @@ install-tools:
 	go install github.com/air-verse/air@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/swaggo/swag/cmd/swag@latest
 
 ## check: Run all quality checks
-check: fmt lint test
+check: fmt-check lint test
+
+## ci: Run CI checks (formatting check, linting, tests)
+ci: fmt-check lint test coverage
 
 ## build-linux: Cross-compile for Linux
 build-linux: clean

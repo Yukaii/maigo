@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	   "fmt"
-	   "net/http"
-	   "strconv"
+	"fmt"
+	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -80,7 +80,7 @@ func (h *OAuthHandler) AuthorizeEndpoint(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("OAuth authorization request", 
+	h.logger.Info("OAuth authorization request",
 		"client_id", req.ClientID,
 		"redirect_uri", req.RedirectURI,
 		"response_type", req.ResponseType,
@@ -89,7 +89,7 @@ func (h *OAuthHandler) AuthorizeEndpoint(c *gin.Context) {
 
 	// For demonstration, we'll skip the user authentication UI and assume user is already authenticated
 	// In a real implementation, you would redirect to a login page if not authenticated
-	
+
 	// Check if user is authenticated (from session/cookie)
 	userID := h.getCurrentUserID(c)
 	if userID == 0 {
@@ -102,7 +102,7 @@ func (h *OAuthHandler) AuthorizeEndpoint(c *gin.Context) {
 	response, err := h.oauthServer.ProcessAuthorizationRequest(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.Error("Authorization request failed", "error", err)
-		
+
 		// Check if it's a token error response
 		if tokenErr, ok := err.(*oauth.TokenErrorResponse); ok {
 			h.redirectWithError(c, req.RedirectURI, req.State, tokenErr.ErrorCode, tokenErr.ErrorDescription)
@@ -117,7 +117,7 @@ func (h *OAuthHandler) AuthorizeEndpoint(c *gin.Context) {
 }
 
 // TokenEndpoint handles OAuth 2.0 token requests
-// POST /oauth/token  
+// POST /oauth/token
 func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 	var req oauth.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
@@ -141,7 +141,7 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 	tokens, err := h.oauthServer.ProcessTokenRequest(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.Error("Token request failed", "error", err)
-		
+
 		// Check if it's a token error response
 		if tokenErr, ok := err.(*oauth.TokenErrorResponse); ok {
 			status := http.StatusBadRequest
@@ -176,13 +176,13 @@ func (h *OAuthHandler) RevokeEndpoint(c *gin.Context) {
 
 	// For simplicity, we'll assume this is a refresh token
 	// In a real implementation, you'd determine the token type
-	
+
 	h.logger.Info("Token revocation request", "token_prefix", token[:min(8, len(token))])
-	
+
 	// Since we don't have the user ID from the token directly,
 	// we'll need to parse the token or look it up in the database
 	// For now, we'll return success (idempotent)
-	
+
 	h.logger.Info("Token revoked successfully")
 	c.JSON(http.StatusOK, gin.H{"message": "Token revoked successfully"})
 }
@@ -199,7 +199,7 @@ func (h *OAuthHandler) getCurrentUserID(c *gin.Context) int64 {
 			return userID
 		}
 	}
-	
+
 	// Check session cookie or other auth mechanism
 	// For now, return 0 (not authenticated)
 	return 0
@@ -288,7 +288,7 @@ func (h *OAuthHandler) extractUserIDFromToken(tokenString string) (int64, error)
 // POST /oauth/authorize
 func (h *OAuthHandler) AuthorizePostEndpoint(c *gin.Context) {
 	action := c.PostForm("action")
-	
+
 	// Parse the authorization request parameters
 	var req oauth.AuthorizationRequest
 	if err := c.ShouldBind(&req); err != nil {
@@ -296,18 +296,18 @@ func (h *OAuthHandler) AuthorizePostEndpoint(c *gin.Context) {
 		c.String(http.StatusBadRequest, "Invalid request parameters")
 		return
 	}
-	
+
 	if action == "login" {
 		// Handle login attempt
 		username := c.PostForm("username")
 		password := c.PostForm("password")
-		
+
 		if username == "" || password == "" {
 			h.logger.Error("Missing username or password")
 			h.renderLoginPageWithError(c, &req, "Username and password are required")
 			return
 		}
-		
+
 		// Authenticate user
 		tokens, err := h.oauthServer.AuthenticateUser(c.Request.Context(), username, password)
 		if err != nil {
@@ -315,28 +315,28 @@ func (h *OAuthHandler) AuthorizePostEndpoint(c *gin.Context) {
 			h.renderLoginPageWithError(c, &req, "Invalid username or password")
 			return
 		}
-		
-		// Parse token to get user ID 
+
+		// Parse token to get user ID
 		userID, err := h.extractUserIDFromToken(tokens.AccessToken)
 		if err != nil {
 			h.logger.Error("Failed to extract user ID from token", "error", err)
 			h.renderLoginPageWithError(c, &req, "Authentication error")
 			return
 		}
-		
+
 		h.logger.Info("User authenticated successfully", "username", username, "user_id", userID)
-		
+
 		// Show authorization consent page
 		h.renderAuthorizationPage(c, &req, userID)
 		return
-		
+
 	} else if action == "deny" {
 		// User denied authorization
 		redirectURI := c.PostForm("redirect_uri")
 		state := c.PostForm("state")
 		h.redirectWithError(c, redirectURI, state, oauth.ErrorAccessDenied, "User denied authorization")
 		return
-		
+
 	} else if action == "authorize" {
 		// Get user ID from the form (set during login)
 		userIDStr := c.PostForm("user_id")
@@ -345,19 +345,19 @@ func (h *OAuthHandler) AuthorizePostEndpoint(c *gin.Context) {
 			h.renderLoginPage(c, &req) // Redirect back to login
 			return
 		}
-		
+
 		userID, err := strconv.ParseInt(userIDStr, 10, 64)
 		if err != nil {
 			h.logger.Error("Invalid user ID in authorization request", "user_id", userIDStr, "error", err)
 			h.renderLoginPage(c, &req) // Redirect back to login
 			return
 		}
-		
+
 		// Process authorization request with the authenticated user ID
 		response, err := h.oauthServer.ProcessAuthorizationRequestWithUser(c.Request.Context(), &req, userID)
 		if err != nil {
 			h.logger.Error("Authorization request failed", "error", err)
-			
+
 			if tokenErr, ok := err.(*oauth.TokenErrorResponse); ok {
 				h.redirectWithError(c, req.RedirectURI, req.State, tokenErr.ErrorCode, tokenErr.ErrorDescription)
 			} else {
@@ -370,7 +370,7 @@ func (h *OAuthHandler) AuthorizePostEndpoint(c *gin.Context) {
 		h.redirectWithCode(c, req.RedirectURI, response.Code, response.State)
 		return
 	}
-	
+
 	// Invalid action
 	h.logger.Error("Invalid action in authorization POST", "action", action)
 	c.String(http.StatusBadRequest, "Invalid action")
@@ -382,7 +382,7 @@ func (h *OAuthHandler) redirectWithCode(c *gin.Context, redirectURI, code, state
 	if state != "" {
 		redirectURL += fmt.Sprintf("&state=%s", state)
 	}
-	
+
 	h.logger.Info("Redirecting with authorization code", "redirect_url", redirectURL)
 	c.Redirect(http.StatusFound, redirectURL)
 }
@@ -397,7 +397,7 @@ func (h *OAuthHandler) redirectWithError(c *gin.Context, redirectURI, state, err
 		})
 		return
 	}
-	
+
 	redirectURL := fmt.Sprintf("%s?error=%s", redirectURI, errorCode)
 	if errorDescription != "" {
 		redirectURL += fmt.Sprintf("&error_description=%s", errorDescription)
@@ -405,7 +405,7 @@ func (h *OAuthHandler) redirectWithError(c *gin.Context, redirectURI, state, err
 	if state != "" {
 		redirectURL += fmt.Sprintf("&state=%s", state)
 	}
-	
+
 	h.logger.Info("Redirecting with error", "error", errorCode, "redirect_url", redirectURL)
 	c.Redirect(http.StatusFound, redirectURL)
 }

@@ -115,7 +115,7 @@ func (suite *IntegrationTestSuite) TestHealthEndpoints() {
 			suite.server.ServeHTTP(w, req)
 
 			assert.Equal(suite.T(), tt.expectedStatus, w.Code)
-			
+
 			var response map[string]interface{}
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			require.NoError(suite.T(), err)
@@ -196,13 +196,13 @@ func (suite *IntegrationTestSuite) TestCreateShortURL() {
 				var urlResponse models.URL
 				err := json.Unmarshal(w.Body.Bytes(), &urlResponse)
 				require.NoError(suite.T(), err)
-				
+
 				assert.NotEmpty(suite.T(), urlResponse.ID)
 				assert.NotEmpty(suite.T(), urlResponse.ShortCode)
 				assert.Equal(suite.T(), tt.requestBody.URL, urlResponse.TargetURL)
 				assert.Equal(suite.T(), int64(0), urlResponse.Hits)
 				assert.NotZero(suite.T(), urlResponse.CreatedAt)
-				
+
 				if tt.requestBody.Custom != "" {
 					assert.Equal(suite.T(), tt.requestBody.Custom, urlResponse.ShortCode)
 				} else {
@@ -267,7 +267,7 @@ func (suite *IntegrationTestSuite) TestGetURL() {
 				var urlResponse models.URL
 				err := json.Unmarshal(w.Body.Bytes(), &urlResponse)
 				require.NoError(suite.T(), err)
-				
+
 				assert.Equal(suite.T(), tt.shortCode, urlResponse.ShortCode)
 				assert.Equal(suite.T(), "https://example.com", urlResponse.TargetURL)
 				assert.Equal(suite.T(), int64(0), urlResponse.Hits)
@@ -407,7 +407,7 @@ func (suite *IntegrationTestSuite) TestConcurrentURLCreation() {
 				suite.server.ServeHTTP(w, req)
 
 				if w.Code != http.StatusCreated {
-					results <- fmt.Errorf("worker %d, url %d: expected status %d, got %d", 
+					results <- fmt.Errorf("worker %d, url %d: expected status %d, got %d",
 						workerID, j, http.StatusCreated, w.Code)
 				} else {
 					results <- nil
@@ -504,7 +504,7 @@ func (suite *IntegrationTestSuite) TestDatabaseConnection() {
 func (suite *IntegrationTestSuite) TestShortCodeGeneration() {
 	// Create multiple URLs without custom codes
 	var shortCodes []string
-	
+
 	for i := 0; i < 10; i++ {
 		createReq := models.CreateURLRequest{
 			URL: fmt.Sprintf("https://example.com/test%d", i),
@@ -522,11 +522,11 @@ func (suite *IntegrationTestSuite) TestShortCodeGeneration() {
 		var urlResponse models.URL
 		err = json.Unmarshal(w.Body.Bytes(), &urlResponse)
 		require.NoError(suite.T(), err)
-		
+
 		shortCodes = append(shortCodes, urlResponse.ShortCode)
-		
+
 		// Verify short code properties
-		assert.Len(suite.T(), urlResponse.ShortCode, 6) // Default length
+		assert.Len(suite.T(), urlResponse.ShortCode, 6)                   // Default length
 		assert.Regexp(suite.T(), "^[a-zA-Z0-9]+$", urlResponse.ShortCode) // Alphanumeric only
 	}
 

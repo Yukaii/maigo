@@ -41,9 +41,9 @@ type OAuthClient struct {
 
 // OAuthCallbackResult represents the result of OAuth callback
 type OAuthCallbackResult struct {
-	Code  string
-	State string
-	Error string
+	Code             string
+	State            string
+	Error            string
 	ErrorDescription string
 }
 
@@ -71,7 +71,7 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 		return nil, fmt.Errorf("failed to generate PKCE parameters: %w", err)
 	}
 
-	c.logger.Info("Generated PKCE parameters", 
+	c.logger.Info("Generated PKCE parameters",
 		"code_challenge_method", pkce.CodeChallengeMethod,
 		"code_verifier_length", len(pkce.CodeVerifier),
 		"code_challenge_length", len(pkce.CodeChallenge),
@@ -102,7 +102,7 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 	// Step 5: Open browser to authorization URL
 	fmt.Printf("🌐 Opening browser for OAuth authorization...\n")
 	fmt.Printf("If the browser doesn't open automatically, please visit:\n%s\n\n", authURL)
-	
+
 	if err := c.openBrowser(authURL); err != nil {
 		c.logger.Warn("Failed to open browser automatically", "error", err)
 		fmt.Printf("⚠️  Please manually open the URL above in your browser.\n\n")
@@ -110,29 +110,29 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 
 	// Step 6: Wait for callback
 	fmt.Printf("⏳ Waiting for authorization...\n")
-	
+
 	select {
 	case result := <-callbackChan:
 		if result.Error != "" {
 			return nil, fmt.Errorf("authorization failed: %s - %s", result.Error, result.ErrorDescription)
 		}
-		
+
 		c.logger.Info("Authorization code received", "code_length", len(result.Code))
-		
+
 		// Step 7: Exchange authorization code for tokens
 		tokens, err := c.exchangeCodeForTokens(result.Code, pkce.CodeVerifier)
 		if err != nil {
 			return nil, fmt.Errorf("failed to exchange code for tokens: %w", err)
 		}
-		
+
 		c.logger.Info("Tokens obtained successfully")
 		fmt.Printf("[SUCCESS] OAuth authorization successful!\n")
-		
+
 		return tokens, nil
-		
+
 	case <-ctx.Done():
 		return nil, fmt.Errorf("authorization timeout or cancelled")
-		
+
 	case <-time.After(5 * time.Minute):
 		return nil, fmt.Errorf("authorization timeout after 5 minutes")
 	}
@@ -151,7 +151,7 @@ func (c *OAuthClient) generateState() (string, error) {
 // buildAuthorizationURL builds the OAuth 2.0 authorization URL with PKCE
 func (c *OAuthClient) buildAuthorizationURL(pkce *oauth.PKCEParams, state string) (string, error) {
 	authURL := fmt.Sprintf("%s/oauth/authorize", c.baseURL)
-	
+
 	params := url.Values{}
 	params.Set("response_type", "code")
 	params.Set("client_id", c.clientID)
@@ -160,7 +160,7 @@ func (c *OAuthClient) buildAuthorizationURL(pkce *oauth.PKCEParams, state string
 	params.Set("state", state)
 	params.Set("code_challenge", pkce.CodeChallenge)
 	params.Set("code_challenge_method", pkce.CodeChallengeMethod)
-	
+
 	return authURL + "?" + params.Encode(), nil
 }
 
@@ -177,7 +177,7 @@ func (c *OAuthClient) startCallbackServer(callbackChan chan *OAuthCallbackResult
 	if port == "" {
 		port = "8000"
 	}
-	
+
 	listener, actualPort, err := c.findAvailablePort(port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find available port: %w", err)
@@ -223,14 +223,14 @@ func (c *OAuthClient) findAvailablePort(preferredPort string) (net.Listener, str
 
 	addr := listener.Addr().(*net.TCPAddr)
 	actualPort := fmt.Sprintf("%d", addr.Port)
-	
+
 	return listener, actualPort, nil
 }
 
 // handleCallback handles the OAuth callback
 func (c *OAuthClient) handleCallback(w http.ResponseWriter, r *http.Request, callbackChan chan *OAuthCallbackResult, expectedState string) {
 	query := r.URL.Query()
-	
+
 	result := &OAuthCallbackResult{
 		Code:             query.Get("code"),
 		State:            query.Get("state"),
@@ -258,7 +258,7 @@ func (c *OAuthClient) handleCallback(w http.ResponseWriter, r *http.Request, cal
 		// Escape error content for HTML
 		errorCode := html.EscapeString(result.Error)
 		errorDescription := html.EscapeString(result.ErrorDescription)
-		
+
 		htmlContent = fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -497,7 +497,7 @@ func (c *OAuthClient) handleCallback(w http.ResponseWriter, r *http.Request, cal
 // exchangeCodeForTokens exchanges authorization code for access tokens
 func (c *OAuthClient) exchangeCodeForTokens(code, codeVerifier string) (*models.TokenResponse, error) {
 	tokenURL := fmt.Sprintf("%s/oauth/token", c.baseURL)
-	
+
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
 	data.Set("code", code)

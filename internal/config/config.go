@@ -25,7 +25,7 @@ type Config struct {
 type DatabaseConfig struct {
 	// Primary DATABASE_URL (12-factor app style)
 	URL string `mapstructure:"url"`
-	
+
 	// Individual connection parameters (fallback)
 	Host     string `mapstructure:"host"`
 	Port     int    `mapstructure:"port"`
@@ -185,7 +185,7 @@ func bindEnvVars(v *viper.Viper) {
 	envVars := map[string]string{
 		// 12-factor DATABASE_URL support (highest priority)
 		"DATABASE_URL": "database.url",
-		
+
 		// Individual database parameters (12-factor compatible)
 		"DB_HOST":     "database.host",
 		"DB_PORT":     "database.port",
@@ -195,8 +195,8 @@ func bindEnvVars(v *viper.Viper) {
 		"DB_SSL_MODE": "database.ssl_mode",
 
 		// Server configuration (12-factor compatible)
-		"PORT":      "server.port",  // Standard Heroku PORT variable
-		"HTTP_PORT": "server.port",  // Alternative naming
+		"PORT":      "server.port", // Standard Heroku PORT variable
+		"HTTP_PORT": "server.port", // Alternative naming
 		"HOST":      "server.host",
 
 		// OAuth2 configuration
@@ -209,12 +209,12 @@ func bindEnvVars(v *viper.Viper) {
 		"JWT_EXPIRATION": "jwt.expiration",
 
 		// Application configuration
-		"BASE_DOMAIN":            "app.base_domain",
-		"SHORT_CODE_LENGTH":      "app.short_code_length",
-		"RATE_LIMIT_REQUESTS":    "app.rate_limit.requests",
-		"RATE_LIMIT_WINDOW":      "app.rate_limit.window",
-		"DEBUG":                  "app.debug",
-		"CORS_ENABLED":           "app.cors_enabled",
+		"BASE_DOMAIN":         "app.base_domain",
+		"SHORT_CODE_LENGTH":   "app.short_code_length",
+		"RATE_LIMIT_REQUESTS": "app.rate_limit.requests",
+		"RATE_LIMIT_WINDOW":   "app.rate_limit.window",
+		"DEBUG":               "app.debug",
+		"CORS_ENABLED":        "app.cors_enabled",
 
 		// Logging configuration
 		"LOG_LEVEL":  "log.level",
@@ -242,7 +242,7 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("database user is required (or set DATABASE_URL)")
 		}
 	}
-	
+
 	if cfg.OAuth2.ClientID == "" {
 		return fmt.Errorf("oauth2 client ID is required")
 	}
@@ -268,7 +268,7 @@ func (c *Config) DatabaseURL() string {
 	if c.Database.URL != "" {
 		return c.Database.URL
 	}
-	
+
 	// Otherwise, construct URL from individual parameters
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		c.Database.User,

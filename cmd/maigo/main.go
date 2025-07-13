@@ -18,7 +18,7 @@ var (
 
 func main() {
 	var configFile string
-	
+
 	// Create root command
 	rootCmd := &cobra.Command{
 		Use:   "maigo",
