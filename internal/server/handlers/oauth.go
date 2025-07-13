@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/oauth"

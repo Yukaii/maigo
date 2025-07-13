@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/yukaii/maigo/internal/cli"
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/logger"

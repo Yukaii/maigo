@@ -7,8 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/yukaii/maigo/internal/database/models"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/yukaii/maigo/internal/database/models"
 )
 
 // UserRepository handles user database operations

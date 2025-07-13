@@ -136,7 +136,7 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 		return tokens, nil
 
 	case <-ctx.Done():
-		return nil, fmt.Errorf("authorization timeout or cancelled")
+		return nil, fmt.Errorf("authorization timeout or canceled")
 
 	case <-time.After(5 * time.Minute):
 		return nil, fmt.Errorf("authorization timeout after 5 minutes")

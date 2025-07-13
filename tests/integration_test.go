@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/database/models"
@@ -109,7 +110,7 @@ func (suite *IntegrationTestSuite) TestHealthEndpoints() {
 
 	for _, tt := range tests {
 		suite.Run(tt.name, func() {
-			req := httptest.NewRequest(http.MethodGet, tt.endpoint, nil)
+			req := httptest.NewRequest(http.MethodGet, tt.endpoint, http.NoBody)
 			w := httptest.NewRecorder()
 
 			suite.server.ServeHTTP(w, req)
@@ -251,7 +252,7 @@ func (suite *IntegrationTestSuite) TestGetURL() {
 
 	for _, tt := range tests {
 		suite.Run(tt.name, func() {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/urls/"+tt.shortCode, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/urls/"+tt.shortCode, http.NoBody)
 			w := httptest.NewRecorder()
 
 			suite.server.ServeHTTP(w, req)
@@ -315,7 +316,7 @@ func (suite *IntegrationTestSuite) TestRedirectShortURL() {
 
 	for _, tt := range tests {
 		suite.Run(tt.name, func() {
-			req := httptest.NewRequest(http.MethodGet, "/"+tt.shortCode, nil)
+			req := httptest.NewRequest(http.MethodGet, "/"+tt.shortCode, http.NoBody)
 			w := httptest.NewRecorder()
 
 			suite.server.ServeHTTP(w, req)
@@ -351,7 +352,7 @@ func (suite *IntegrationTestSuite) TestHitTracking() {
 	require.Equal(suite.T(), http.StatusCreated, w.Code)
 
 	// Check initial hit count
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/tracking", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/tracking", http.NoBody)
 	w = httptest.NewRecorder()
 	suite.server.ServeHTTP(w, req)
 	require.Equal(suite.T(), http.StatusOK, w.Code)
@@ -363,13 +364,13 @@ func (suite *IntegrationTestSuite) TestHitTracking() {
 
 	// Perform redirects
 	for i := 1; i <= 3; i++ {
-		req = httptest.NewRequest(http.MethodGet, "/tracking", nil)
+		req = httptest.NewRequest(http.MethodGet, "/tracking", http.NoBody)
 		w = httptest.NewRecorder()
 		suite.server.ServeHTTP(w, req)
 		assert.Equal(suite.T(), http.StatusFound, w.Code)
 
 		// Check hit count after each redirect
-		req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/tracking", nil)
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/tracking", http.NoBody)
 		w = httptest.NewRecorder()
 		suite.server.ServeHTTP(w, req)
 		require.Equal(suite.T(), http.StatusOK, w.Code)
@@ -465,7 +466,7 @@ func (suite *IntegrationTestSuite) TestInvalidRoutes() {
 
 	for _, tt := range tests {
 		suite.Run(tt.name, func() {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
 			w := httptest.NewRecorder()
 
 			suite.server.ServeHTTP(w, req)

@@ -11,13 +11,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/database/models"
 	"github.com/yukaii/maigo/internal/logger"
 	"github.com/yukaii/maigo/internal/oauth"
 	"github.com/yukaii/maigo/internal/server"
-	"golang.org/x/term"
 )
 
 // NewServerCommand creates the server command
@@ -196,11 +197,11 @@ func NewDeleteCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 				var response string
 				_, err := fmt.Scanln(&response)
 				if err != nil {
-					fmt.Println("❌ Error reading input. Deletion cancelled.")
+					fmt.Println("❌ Error reading input. Deletion canceled.")
 					return nil
 				}
 				if response != "y" && response != "Y" && response != "yes" {
-					fmt.Println("❌ Deletion cancelled.")
+					fmt.Println("❌ Deletion canceled.")
 					return nil
 				}
 			}

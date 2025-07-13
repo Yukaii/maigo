@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/yukaii/maigo/internal/logger"
 )
 

@@ -12,6 +12,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/yukaii/maigo/internal/config"
 )
 
@@ -65,7 +66,12 @@ func RunMigrations(pool *pgxpool.Pool) error {
 
 	// Convert pgx connection to sql.DB for migrate
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			// Log error but don't fail the migration process
+			fmt.Printf("Warning: failed to close database connection: %v\n", err)
+		}
+	}()
 
 	// Create postgres driver instance
 	driver, err := postgres.WithInstance(db, &postgres.Config{})

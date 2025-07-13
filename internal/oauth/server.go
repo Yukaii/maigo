@@ -3,14 +3,14 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
-	"log/slog"
-
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database/models"
 )
@@ -585,7 +585,11 @@ func (s *Server) AuthenticateUser(ctx context.Context, username, password string
 // RegisterUser creates a new user account and returns the user
 func (s *Server) RegisterUser(ctx context.Context, username, email, password string) (*models.User, error) {
 	// Check if user already exists
-	existingUser, _ := s.getUserByUsernameOrEmail(ctx, email)
+	existingUser, err := s.getUserByUsernameOrEmail(ctx, email)
+	if err != nil {
+		// Log error but continue - absence of user is expected for registration
+		s.logger.Debug("User lookup failed during registration", "error", err)
+	}
 	if existingUser != nil {
 		return nil, &TokenErrorResponse{
 			ErrorCode:        ErrorInvalidRequest,
@@ -606,7 +610,7 @@ func (s *Server) RegisterUser(ctx context.Context, username, email, password str
 		VALUES ($1, $2, $3, NOW())
 		RETURNING id, created_at`
 
-	err := s.db.QueryRow(ctx, query, user.Username, user.Email, user.PasswordHash).
+	err = s.db.QueryRow(ctx, query, user.Username, user.Email, user.PasswordHash).
 		Scan(&user.ID, &user.CreatedAt)
 	if err != nil {
 		return nil, &TokenErrorResponse{

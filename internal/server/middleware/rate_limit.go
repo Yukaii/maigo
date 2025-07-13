@@ -5,8 +5,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/yukaii/maigo/internal/config"
 	"golang.org/x/time/rate"
+
+	"github.com/yukaii/maigo/internal/config"
 )
 
 // RateLimit creates a rate limiting middleware
