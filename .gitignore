@@ -53,6 +53,9 @@ logs/
 *.sqlite
 *.sqlite3
 
+# Configuration files
+config/config.yaml
+
 # CLI client credentials  
 maigo-cli.json
 
