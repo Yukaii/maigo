@@ -17,8 +17,25 @@ var (
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load()
+	var configFile string
+	
+	// Create root command
+	rootCmd := &cobra.Command{
+		Use:   "maigo",
+		Short: "A modern terminal-first URL shortener",
+		Long: `Maigo is a modern terminal-first URL shortener with OAuth2 authentication.
+It provides imperative CLI commands for direct URL management and analytics.`,
+		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
+	}
+
+	// Add persistent flags
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file path (default searches for maigo.yaml in current directory and $HOME/.maigo/)")
+
+	// Parse flags to get configFile value
+	rootCmd.ParseFlags(os.Args[1:])
+
+	// Load configuration with optional config file path
+	cfg, err := config.Load(configFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		os.Exit(1)
@@ -30,15 +47,6 @@ func main() {
 		Format: cfg.Log.Format,
 	})
 	logger.SetGlobalLogger(log)
-
-	// Create root command
-	rootCmd := &cobra.Command{
-		Use:   "maigo",
-		Short: "A modern terminal-first URL shortener",
-		Long: `Maigo is a modern terminal-first URL shortener with OAuth2 authentication.
-It provides imperative CLI commands for direct URL management and analytics.`,
-		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
-	}
 
 	// Add subcommands
 	rootCmd.AddCommand(

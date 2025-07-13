@@ -84,15 +84,20 @@ type LogConfig struct {
 }
 
 // Load loads configuration from various sources
-func Load() (*Config, error) {
+// If configFile is provided, it will be used instead of searching default paths
+func Load(configFile ...string) (*Config, error) {
 	v := viper.New()
 
-	// Set configuration name and paths
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-	v.AddConfigPath("./configs")
-	v.AddConfigPath("$HOME/.maigo")
+	// If specific config file is provided, use it
+	if len(configFile) > 0 && configFile[0] != "" {
+		v.SetConfigFile(configFile[0])
+	} else {
+		// Set configuration name and paths for default search
+		v.SetConfigName("maigo")
+		v.SetConfigType("yaml")
+		v.AddConfigPath(".")
+		v.AddConfigPath("$HOME/.maigo")
+	}
 
 	// Set environment variable prefix
 	v.SetEnvPrefix("MAIGO")

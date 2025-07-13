@@ -55,6 +55,9 @@ logs/
 
 # Configuration files
 config/config.yaml
+maigo.yaml
+maigo.*.yaml
+!maigo.example.yaml
 
 # CLI client credentials  
 maigo-cli.json

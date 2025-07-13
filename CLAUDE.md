@@ -77,6 +77,10 @@ Maigo is a **terminal-first URL shortener** built with Go, emphasizing a geek-fo
 ## CLI Command Structure
 
 ```bash
+# Global Flags
+maigo --config /path/to/config.yaml <command>  # Use specific config file
+maigo --help                                   # Show help
+
 # Authentication (OAuth 2.0 with PKCE)
 maigo auth register <username> <email>   # Opens web browser for OAuth 2.0 registration
 maigo auth login <username>              # Opens web browser for OAuth 2.0 authorization
@@ -95,7 +99,7 @@ maigo stats <short-code>                 # Show URL analytics
 
 # Server Operations
 maigo server                             # Start HTTP server
-
+maigo server --config custom.yaml        # Start with specific config
 
 # System Commands
 maigo version                            # Show version
@@ -129,7 +133,7 @@ maigo/
 │   ├── shortener/               # URL shortening logic
 │   └── config/                  # Configuration
 ├── config/
-│   ├── config.yaml              # Application configuration
+│   ├── maigo.yaml               # Application configuration
 │   └── test.yaml                # Test configuration
 ├── tests/
 │   └── integration/             # Integration tests
@@ -160,7 +164,7 @@ DEBUG=false LOG_LEVEL=info maigo server
 ./maigo server --db-host localhost --db-port 5432 --db-name maigo
 
 # Configuration file (lowest priority)
-./maigo server  # Uses config/config.yaml
+./maigo server  # Uses ./maigo.yaml or $HOME/.maigo/maigo.yaml
 
 # CLI testing
 ./maigo auth register yukai test@example.com  # Register user
@@ -228,7 +232,7 @@ maigo server \
 ### Configuration File (Lowest Priority)
 
 ```yaml
-# config/config.yaml
+# maigo.yaml
 database:
   # Option 1: DATABASE_URL (recommended)
   url: "postgres://user:pass@host:port/db?sslmode=require"
