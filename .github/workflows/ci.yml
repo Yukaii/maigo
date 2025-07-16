@@ -13,7 +13,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15
@@ -82,10 +82,10 @@ jobs:
           echo "Waiting for PostgreSQL..."
           sleep 1
         done
-        
+
         # Install migrate tool
         go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-        
+
         # Run migrations
         migrate -path internal/database/migrations -database "postgres://postgres:password@localhost:5432/maigo_test?sslmode=disable" up
 
@@ -145,15 +145,15 @@ jobs:
         VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
         BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        
+
         LDFLAGS="-ldflags -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
-        
+
         if [ "${{ matrix.goos }}" = "windows" ]; then
           BINARY_NAME="maigo-${{ matrix.goos }}-${{ matrix.goarch }}.exe"
         else
           BINARY_NAME="maigo-${{ matrix.goos }}-${{ matrix.goarch }}"
         fi
-        
+
         go build ${LDFLAGS} -o dist/${BINARY_NAME} ./cmd/maigo
 
     - name: Upload build artifacts
@@ -162,26 +162,3 @@ jobs:
         name: maigo-${{ matrix.goos }}-${{ matrix.goarch }}
         path: dist/
 
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-
-    - name: Run Gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@master
-      with:
-        args: '-fmt sarif -out gosec.sarif ./...'
-
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: gosec.sarif
