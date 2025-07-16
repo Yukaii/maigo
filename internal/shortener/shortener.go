@@ -1,3 +1,4 @@
+// Package shortener implements URL shortening logic for Maigo.
 package shortener
 
 import (
@@ -48,7 +49,7 @@ func (e *Encoder) Encode(num int64) string {
 	for num > 0 {
 		remainder := num % base
 		result.WriteByte(e.alphabet[remainder])
-		num = num / base
+		num /= base
 	}
 
 	// Reverse the string
@@ -97,7 +98,7 @@ func (e *Encoder) GenerateRandom() (string, error) {
 
 // GenerateCustom validates and formats a custom short code
 func (e *Encoder) GenerateCustom(custom string) (string, error) {
-	if len(custom) == 0 {
+	if custom == "" {
 		return "", fmt.Errorf("custom short code cannot be empty")
 	}
 
@@ -136,7 +137,7 @@ func (e *Encoder) ValidateShortCode(shortCode string) error {
 
 // IsValidURL performs basic URL validation
 func IsValidURL(url string) bool {
-	if len(url) == 0 {
+	if url == "" {
 		return false
 	}
 
@@ -146,7 +147,7 @@ func IsValidURL(url string) bool {
 
 // SanitizeURL cleans and validates a URL
 func SanitizeURL(url string) (string, error) {
-	if len(url) == 0 {
+	if url == "" {
 		return "", fmt.Errorf("URL cannot be empty")
 	}
 

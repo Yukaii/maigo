@@ -45,15 +45,11 @@ func (r *URLRepository) Create(ctx context.Context, shortCode, targetURL string,
 	return url, nil
 }
 
-// GetByID retrieves a URL by ID
-func (r *URLRepository) GetByID(ctx context.Context, id int64) (*models.URL, error) {
+// getByField retrieves a URL by a given field and value
+func (r *URLRepository) getByField(ctx context.Context, field string, value any) (*models.URL, error) {
 	url := &models.URL{}
-	query := `
-		SELECT id, short_code, target_url, created_at, hits, user_id
-		FROM urls
-		WHERE id = $1`
-
-	err := r.db.QueryRow(ctx, query, id).Scan(
+	query := `SELECT id, short_code, target_url, created_at, hits, user_id FROM urls WHERE ` + field + ` = $1`
+	err := r.db.QueryRow(ctx, query, value).Scan(
 		&url.ID,
 		&url.ShortCode,
 		&url.TargetURL,
@@ -67,38 +63,26 @@ func (r *URLRepository) GetByID(ctx context.Context, id int64) (*models.URL, err
 		}
 		return nil, fmt.Errorf("failed to get URL: %w", err)
 	}
-
 	return url, nil
+}
+
+// GetByID retrieves a URL by ID
+func (r *URLRepository) GetByID(ctx context.Context, id int64) (*models.URL, error) {
+	return r.getByField(ctx, "id", id)
 }
 
 // GetByShortCode retrieves a URL by short code
 func (r *URLRepository) GetByShortCode(ctx context.Context, shortCode string) (*models.URL, error) {
-	url := &models.URL{}
-	query := `
-		SELECT id, short_code, target_url, created_at, hits, user_id
-		FROM urls
-		WHERE short_code = $1`
-
-	err := r.db.QueryRow(ctx, query, shortCode).Scan(
-		&url.ID,
-		&url.ShortCode,
-		&url.TargetURL,
-		&url.CreatedAt,
-		&url.Hits,
-		&url.UserID,
-	)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("URL not found")
-		}
-		return nil, fmt.Errorf("failed to get URL: %w", err)
-	}
-
-	return url, nil
+	return r.getByField(ctx, "short_code", shortCode)
 }
 
 // GetByUserID retrieves URLs for a specific user with pagination
-func (r *URLRepository) GetByUserID(ctx context.Context, userID int64, page, pageSize int) ([]models.URL, int64, error) {
+func (r *URLRepository) GetByUserID(
+	ctx context.Context,
+	userID int64,
+	page int,
+	pageSize int,
+) ([]models.URL, int64, error) {
 	// Get total count for the user
 	var total int64
 	countQuery := `SELECT COUNT(*) FROM urls WHERE user_id = $1`

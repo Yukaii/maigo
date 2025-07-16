@@ -125,7 +125,10 @@ const (
 )
 
 // ProcessAuthorizationRequest processes OAuth 2.0 authorization request with PKCE
-func (s *Server) ProcessAuthorizationRequest(ctx context.Context, req *AuthorizationRequest) (*AuthorizeResponse, error) {
+func (s *Server) ProcessAuthorizationRequest(
+	ctx context.Context,
+	req *AuthorizationRequest,
+) (*AuthorizeResponse, error) {
 	// Validate response type
 	if req.ResponseType != ResponseTypeCode {
 		return nil, &TokenErrorResponse{
@@ -153,7 +156,8 @@ func (s *Server) ProcessAuthorizationRequest(ctx context.Context, req *Authoriza
 
 	// Validate PKCE parameters if present
 	if req.CodeChallenge != "" {
-		if err := ValidateCodeChallenge(req.CodeChallenge); err != nil {
+		err = ValidateCodeChallenge(req.CodeChallenge)
+		if err != nil {
 			return nil, &TokenErrorResponse{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
@@ -165,7 +169,8 @@ func (s *Server) ProcessAuthorizationRequest(ctx context.Context, req *Authoriza
 			req.CodeChallengeMethod = PKCEMethodPlain
 		}
 
-		if err := ValidateCodeChallengeMethod(req.CodeChallengeMethod); err != nil {
+		err = ValidateCodeChallengeMethod(req.CodeChallengeMethod)
+		if err != nil {
 			return nil, &TokenErrorResponse{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
@@ -209,7 +214,11 @@ func (s *Server) ProcessAuthorizationRequest(ctx context.Context, req *Authoriza
 }
 
 // ProcessAuthorizationRequestWithUser processes OAuth 2.0 authorization request with a specific user ID
-func (s *Server) ProcessAuthorizationRequestWithUser(ctx context.Context, req *AuthorizationRequest, userID int64) (*AuthorizeResponse, error) {
+func (s *Server) ProcessAuthorizationRequestWithUser(
+	ctx context.Context,
+	req *AuthorizationRequest,
+	userID int64,
+) (*AuthorizeResponse, error) {
 	// Validate response type
 	if req.ResponseType != ResponseTypeCode {
 		return nil, &TokenErrorResponse{
@@ -237,7 +246,8 @@ func (s *Server) ProcessAuthorizationRequestWithUser(ctx context.Context, req *A
 
 	// Validate PKCE parameters if present
 	if req.CodeChallenge != "" {
-		if err := ValidateCodeChallenge(req.CodeChallenge); err != nil {
+		err = ValidateCodeChallenge(req.CodeChallenge)
+		if err != nil {
 			return nil, &TokenErrorResponse{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
@@ -249,7 +259,8 @@ func (s *Server) ProcessAuthorizationRequestWithUser(ctx context.Context, req *A
 			req.CodeChallengeMethod = PKCEMethodPlain
 		}
 
-		if err := ValidateCodeChallengeMethod(req.CodeChallengeMethod); err != nil {
+		err = ValidateCodeChallengeMethod(req.CodeChallengeMethod)
+		if err != nil {
 			return nil, &TokenErrorResponse{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
@@ -384,7 +395,8 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 			}
 		}
 
-		if err := ValidateCodeVerifier(req.CodeVerifier); err != nil {
+		err = ValidateCodeVerifier(req.CodeVerifier)
+		if err != nil {
 			return nil, &TokenErrorResponse{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_verifier: %v", err),

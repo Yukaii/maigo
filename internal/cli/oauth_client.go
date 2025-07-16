@@ -91,7 +91,7 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
 	defer func() {
-		if err := server.Shutdown(ctx); err != nil {
+		if shutdownErr := server.Shutdown(ctx); shutdownErr != nil {
 			// Log the error but don't fail the main operation
 			fmt.Printf("Warning: failed to shutdown callback server: %v\n", err)
 		}
@@ -239,7 +239,12 @@ func (c *OAuthClient) findAvailablePort(preferredPort string) (net.Listener, str
 }
 
 // handleCallback handles the OAuth callback
-func (c *OAuthClient) handleCallback(w http.ResponseWriter, r *http.Request, callbackChan chan *OAuthCallbackResult, expectedState string) {
+func (c *OAuthClient) handleCallback(
+	w http.ResponseWriter,
+	r *http.Request,
+	callbackChan chan *OAuthCallbackResult,
+	expectedState string,
+) {
 	query := r.URL.Query()
 
 	result := &OAuthCallbackResult{

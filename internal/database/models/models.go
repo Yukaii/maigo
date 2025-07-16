@@ -1,3 +1,4 @@
+// Package models defines database models for Maigo.
 package models
 
 import (
