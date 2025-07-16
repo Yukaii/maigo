@@ -1,3 +1,4 @@
+// Package handlers contains HTTP handlers for Maigo server endpoints.
 package handlers
 
 import (
@@ -14,7 +15,7 @@ import (
 	"github.com/yukaii/maigo/internal/oauth"
 )
 
-// Template data structures for OAuth pages
+// OAuthLoginData is the template data structure for OAuth login pages.
 type OAuthLoginData struct {
 	Title               string
 	ClientID            string

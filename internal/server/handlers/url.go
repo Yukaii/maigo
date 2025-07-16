@@ -1,3 +1,4 @@
+// Package handlers contains HTTP handlers for Maigo server endpoints.
 package handlers
 
 import (

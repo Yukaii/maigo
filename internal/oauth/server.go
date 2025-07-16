@@ -1,3 +1,4 @@
+// Package oauth implements OAuth 2.0 and PKCE logic for Maigo.
 package oauth
 
 import (
@@ -464,7 +465,7 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 // RefreshAccessToken creates a new access token from a refresh token
 func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString string) (*TokenPair, error) {
 	// Parse and validate refresh token
-	token, err := jwt.Parse(refreshTokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(refreshTokenString, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}

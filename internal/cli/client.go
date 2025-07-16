@@ -1,3 +1,4 @@
+// Package cli implements the Maigo command-line interface.
 package cli
 
 import (

@@ -1,3 +1,4 @@
+// Package cli implements the Maigo command-line interface.
 package cli
 
 import (
@@ -154,6 +155,8 @@ func (c *OAuthClient) generateState() (string, error) {
 }
 
 // buildAuthorizationURL builds the OAuth 2.0 authorization URL with PKCE
+//
+//nolint:unparam // error is always nil for interface compatibility
 func (c *OAuthClient) buildAuthorizationURL(pkce *oauth.PKCEParams, state string) (string, error) {
 	authURL := fmt.Sprintf("%s/oauth/authorize", c.baseURL)
 
@@ -170,7 +173,10 @@ func (c *OAuthClient) buildAuthorizationURL(pkce *oauth.PKCEParams, state string
 }
 
 // startCallbackServer starts a local HTTP server to handle OAuth callback
-func (c *OAuthClient) startCallbackServer(callbackChan chan *OAuthCallbackResult, expectedState string) (*http.Server, error) {
+func (c *OAuthClient) startCallbackServer(
+	callbackChan chan *OAuthCallbackResult,
+	expectedState string,
+) (*http.Server, error) {
 	// Parse redirect URI to get port
 	redirectURL, err := url.Parse(c.redirectURI)
 	if err != nil {

@@ -296,41 +296,57 @@ func (c *Config) ParseDatabaseURL() error {
 		return fmt.Errorf("invalid DATABASE_URL format: %w", err)
 	}
 
-	// Only populate individual fields if they're not already set
-	if c.Database.Host == "" && parsedURL.Hostname() != "" {
-		c.Database.Host = parsedURL.Hostname()
-	}
-
-	if c.Database.Port == 0 && parsedURL.Port() != "" {
-		if port, err := strconv.Atoi(parsedURL.Port()); err == nil {
-			c.Database.Port = port
-		}
-	}
-
-	if c.Database.Name == "" && parsedURL.Path != "" {
-		// Remove leading slash from path
-		dbName := strings.TrimPrefix(parsedURL.Path, "/")
-		if dbName != "" {
-			c.Database.Name = dbName
-		}
-	}
-
-	if c.Database.User == "" && parsedURL.User != nil {
-		c.Database.User = parsedURL.User.Username()
-	}
-
-	if c.Database.Password == "" && parsedURL.User != nil {
-		if password, ok := parsedURL.User.Password(); ok {
-			c.Database.Password = password
-		}
-	}
-
-	// Parse query parameters for SSL mode and other options
-	if c.Database.SSLMode == "" {
-		if sslMode := parsedURL.Query().Get("sslmode"); sslMode != "" {
-			c.Database.SSLMode = sslMode
-		}
-	}
+	populateHost(&c.Database, parsedURL)
+	populatePort(&c.Database, parsedURL)
+	populateName(&c.Database, parsedURL)
+	populateUser(&c.Database, parsedURL)
+	populatePassword(&c.Database, parsedURL)
+	populateSSLMode(&c.Database, parsedURL)
 
 	return nil
+}
+
+func populateHost(db *DatabaseConfig, u *url.URL) {
+	if db.Host == "" && u.Hostname() != "" {
+		db.Host = u.Hostname()
+	}
+}
+
+func populatePort(db *DatabaseConfig, u *url.URL) {
+	if db.Port == 0 && u.Port() != "" {
+		if port, err := strconv.Atoi(u.Port()); err == nil {
+			db.Port = port
+		}
+	}
+}
+
+func populateName(db *DatabaseConfig, u *url.URL) {
+	if db.Name == "" && u.Path != "" {
+		dbName := strings.TrimPrefix(u.Path, "/")
+		if dbName != "" {
+			db.Name = dbName
+		}
+	}
+}
+
+func populateUser(db *DatabaseConfig, u *url.URL) {
+	if db.User == "" && u.User != nil {
+		db.User = u.User.Username()
+	}
+}
+
+func populatePassword(db *DatabaseConfig, u *url.URL) {
+	if db.Password == "" && u.User != nil {
+		if password, ok := u.User.Password(); ok {
+			db.Password = password
+		}
+	}
+}
+
+func populateSSLMode(db *DatabaseConfig, u *url.URL) {
+	if db.SSLMode == "" {
+		if sslMode := u.Query().Get("sslmode"); sslMode != "" {
+			db.SSLMode = sslMode
+		}
+	}
 }

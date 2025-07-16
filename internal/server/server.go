@@ -1,3 +1,4 @@
+// Package server starts and configures the Maigo HTTP server.
 package server
 
 import (

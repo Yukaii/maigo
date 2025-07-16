@@ -1,3 +1,4 @@
+// Package database manages database connections and migrations for Maigo.
 package database
 
 import (

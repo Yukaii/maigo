@@ -1,3 +1,4 @@
+// Package logger provides structured logging utilities for Maigo.
 package logger
 
 import (
@@ -89,11 +90,12 @@ func (h *charmHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.logger.GetLevel() <= logLevelToCharm(level)
 }
 
+//nolint:gocritic // slog.Handler interface requires slog.Record by value, cannot use pointer
 func (h *charmHandler) Handle(ctx context.Context, record slog.Record) error {
 	level := logLevelToCharm(record.Level)
 
 	// Build key-value pairs
-	var keyvals []interface{}
+	var keyvals []any
 	record.Attrs(func(attr slog.Attr) bool {
 		keyvals = append(keyvals, attr.Key, attr.Value.Any())
 		return true
@@ -147,7 +149,7 @@ func GetGlobalLogger() *Logger {
 	return globalLogger
 }
 
-// Convenience functions that use the global logger
+// Debug logs a debug-level message using the global logger.
 func Debug(msg string, args ...any) {
 	GetGlobalLogger().Debug(msg, args...)
 }

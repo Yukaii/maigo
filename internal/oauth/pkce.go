@@ -1,3 +1,4 @@
+// Package oauth implements OAuth 2.0 and PKCE logic for Maigo.
 package oauth
 
 import (

@@ -1,3 +1,4 @@
+// Package repository provides database repositories for Maigo.
 package repository
 
 import (
@@ -158,14 +159,14 @@ func (r *UserRepository) Authenticate(ctx context.Context, username, password st
 }
 
 // Update updates user information
-func (r *UserRepository) Update(ctx context.Context, id int64, updates map[string]interface{}) (*models.User, error) {
+func (r *UserRepository) Update(ctx context.Context, id int64, updates map[string]any) (*models.User, error) {
 	if len(updates) == 0 {
 		return r.GetByID(ctx, id)
 	}
 
 	// Build dynamic query
 	setParts := make([]string, 0, len(updates))
-	args := make([]interface{}, 0, len(updates)+1)
+	args := make([]any, 0, len(updates)+1)
 	argIndex := 1
 
 	for field, value := range updates {

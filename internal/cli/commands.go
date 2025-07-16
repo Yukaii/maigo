@@ -1,3 +1,4 @@
+// Package cli implements the Maigo command-line interface.
 package cli
 
 import (
@@ -130,7 +131,7 @@ func NewAuthCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 			Use:   "status",
 			Short: "Show authentication status",
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runAuthStatus(cfg, log)
+				return runAuthStatus(cfg)
 			},
 		},
 	)
@@ -537,7 +538,7 @@ func runLogout(cfg *config.Config, log *logger.Logger) error {
 }
 
 // runAuthStatus shows current authentication status
-func runAuthStatus(cfg *config.Config, log *logger.Logger) error {
+func runAuthStatus(cfg *config.Config) error {
 	client := NewAPIClient(cfg)
 
 	tokens, err := client.LoadTokens()

@@ -1,3 +1,4 @@
+// Package middleware provides Gin middleware for Maigo server.
 package middleware
 
 import (

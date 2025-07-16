@@ -30,7 +30,12 @@ It provides imperative CLI commands for direct URL management and analytics.`,
 	}
 
 	// Add persistent flags
-	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file path (default searches for maigo.yaml in current directory and $HOME/.maigo/)")
+	rootCmd.PersistentFlags().StringVar(
+		&configFile,
+		"config",
+		"",
+		"config file path (default searches for maigo.yaml in current directory and $HOME/.maigo/)",
+	)
 
 	// Parse flags to get configFile value
 	if err := rootCmd.ParseFlags(os.Args[1:]); err != nil {
