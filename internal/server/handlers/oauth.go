@@ -106,7 +106,7 @@ func (h *OAuthHandler) AuthorizeEndpoint(c *gin.Context) {
 		h.logger.Error("Authorization request failed", "error", err)
 
 		// Check if it's a token error response
-		if tokenErr, ok := err.(*oauth.TokenErrorResponse); ok {
+		if tokenErr, ok := err.(*oauth.TokenError); ok {
 			h.redirectWithError(c, req.RedirectURI, req.State, tokenErr.ErrorCode, tokenErr.ErrorDescription)
 		} else {
 			h.redirectWithError(c, req.RedirectURI, req.State, oauth.ErrorServerError, "Internal server error")
@@ -124,7 +124,7 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 	var req oauth.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
 		h.logger.Error("Invalid token request", "error", err)
-		c.JSON(http.StatusBadRequest, oauth.TokenErrorResponse{
+		c.JSON(http.StatusBadRequest, oauth.TokenError{
 			ErrorCode:        oauth.ErrorInvalidRequest,
 			ErrorDescription: "Invalid request parameters",
 		})
@@ -145,14 +145,14 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 		h.logger.Error("Token request failed", "error", err)
 
 		// Check if it's a token error response
-		if tokenErr, ok := err.(*oauth.TokenErrorResponse); ok {
+		if tokenErr, ok := err.(*oauth.TokenError); ok {
 			status := http.StatusBadRequest
 			if tokenErr.ErrorCode == oauth.ErrorInvalidClient {
 				status = http.StatusUnauthorized
 			}
 			c.JSON(status, tokenErr)
 		} else {
-			c.JSON(http.StatusInternalServerError, oauth.TokenErrorResponse{
+			c.JSON(http.StatusInternalServerError, oauth.TokenError{
 				ErrorCode:        oauth.ErrorServerError,
 				ErrorDescription: "Internal server error",
 			})
@@ -169,7 +169,7 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 func (h *OAuthHandler) RevokeEndpoint(c *gin.Context) {
 	token := c.PostForm("token")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, oauth.TokenErrorResponse{
+		c.JSON(http.StatusBadRequest, oauth.TokenError{
 			ErrorCode:        oauth.ErrorInvalidRequest,
 			ErrorDescription: "Missing token parameter",
 		})
@@ -179,7 +179,7 @@ func (h *OAuthHandler) RevokeEndpoint(c *gin.Context) {
 	// For simplicity, we'll assume this is a refresh token
 	// In a real implementation, you'd determine the token type
 
-	h.logger.Info("Token revocation request", "token_prefix", token[:min(8, len(token))])
+	h.logger.Info("Token revocation request", "token_prefix", token[:minInt(8, len(token))])
 
 	// Since we don't have the user ID from the token directly,
 	// we'll need to parse the token or look it up in the database
@@ -360,7 +360,7 @@ func (h *OAuthHandler) AuthorizePostEndpoint(c *gin.Context) {
 		if err != nil {
 			h.logger.Error("Authorization request failed", "error", err)
 
-			if tokenErr, ok := err.(*oauth.TokenErrorResponse); ok {
+			if tokenErr, ok := err.(*oauth.TokenError); ok {
 				h.redirectWithError(c, req.RedirectURI, req.State, tokenErr.ErrorCode, tokenErr.ErrorDescription)
 			} else {
 				h.redirectWithError(c, req.RedirectURI, req.State, oauth.ErrorServerError, "Internal server error")
@@ -393,7 +393,7 @@ func (h *OAuthHandler) redirectWithCode(c *gin.Context, redirectURI, code, state
 func (h *OAuthHandler) redirectWithError(c *gin.Context, redirectURI, state, errorCode, errorDescription string) {
 	if redirectURI == "" {
 		// Can't redirect, show error page
-		c.JSON(http.StatusBadRequest, oauth.TokenErrorResponse{
+		c.JSON(http.StatusBadRequest, oauth.TokenError{
 			ErrorCode:        errorCode,
 			ErrorDescription: errorDescription,
 		})
@@ -428,8 +428,8 @@ func (h *OAuthHandler) formatPKCE(codeChallenge, method string) string {
 	return fmt.Sprintf("Using PKCE with %s method", method)
 }
 
-// min helper function
-func min(a, b int) int {
+// minInt helper function
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

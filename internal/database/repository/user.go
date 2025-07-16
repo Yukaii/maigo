@@ -176,7 +176,11 @@ func (r *UserRepository) Update(ctx context.Context, id int64, updates map[strin
 			args = append(args, value)
 			argIndex++
 		case "password":
-			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(value.(string)), bcrypt.DefaultCost)
+			passwordStr, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("password must be a string")
+			}
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(passwordStr), bcrypt.DefaultCost)
 			if err != nil {
 				return nil, fmt.Errorf("failed to hash password: %w", err)
 			}

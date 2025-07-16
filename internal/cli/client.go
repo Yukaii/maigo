@@ -64,7 +64,7 @@ func getTokenPath() string {
 func (c *APIClient) SaveTokens(tokens *models.TokenResponse) error {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(c.TokenPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -83,7 +83,7 @@ func (c *APIClient) SaveTokens(tokens *models.TokenResponse) error {
 		return fmt.Errorf("failed to marshal tokens: %w", err)
 	}
 
-	if err := os.WriteFile(c.TokenPath, data, 0600); err != nil {
+	if err := os.WriteFile(c.TokenPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to save tokens: %w", err)
 	}
 
@@ -191,7 +191,7 @@ func (c *APIClient) Login(username, password string) (*models.TokenResponse, err
 }
 
 // Register creates a new user account
-func (c *APIClient) Register(username, email, password string) (*map[string]interface{}, error) {
+func (c *APIClient) Register(username, email, password string) (map[string]interface{}, error) {
 	reqBody := map[string]string{
 		"username": username,
 		"email":    email,
@@ -204,11 +204,11 @@ func (c *APIClient) Register(username, email, password string) (*map[string]inte
 		return nil, fmt.Errorf("registration failed: %w", err)
 	}
 
-	return &response, nil
+	return response, nil
 }
 
 // CreateShortURL creates a new short URL
-func (c *APIClient) CreateShortURL(url, custom string) (*map[string]interface{}, error) {
+func (c *APIClient) CreateShortURL(url, custom string) (map[string]interface{}, error) {
 	token, err := c.GetValidToken()
 	if err != nil {
 		return nil, err
@@ -227,7 +227,7 @@ func (c *APIClient) CreateShortURL(url, custom string) (*map[string]interface{},
 		return nil, fmt.Errorf("failed to create short URL: %w", err)
 	}
 
-	return &response, nil
+	return response, nil
 }
 
 // GetUserURLs retrieves all URLs for the authenticated user
@@ -267,7 +267,7 @@ func (c *APIClient) DeleteURL(shortCode string) error {
 }
 
 // GetURL gets details of a specific short URL
-func (c *APIClient) GetURL(shortCode string) (*map[string]interface{}, error) {
+func (c *APIClient) GetURL(shortCode string) (map[string]interface{}, error) {
 	token, err := c.GetValidToken()
 	if err != nil {
 		return nil, err
@@ -281,11 +281,11 @@ func (c *APIClient) GetURL(shortCode string) (*map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to get URL details: %w", err)
 	}
 
-	return &response, nil
+	return response, nil
 }
 
 // GetURLStats gets analytics for a specific short URL
-func (c *APIClient) GetURLStats(shortCode string) (*map[string]interface{}, error) {
+func (c *APIClient) GetURLStats(shortCode string) (map[string]interface{}, error) {
 	token, err := c.GetValidToken()
 	if err != nil {
 		return nil, err
@@ -299,11 +299,11 @@ func (c *APIClient) GetURLStats(shortCode string) (*map[string]interface{}, erro
 		return nil, fmt.Errorf("failed to get URL statistics: %w", err)
 	}
 
-	return &response, nil
+	return response, nil
 }
 
 // makeRequest makes an HTTP request to the API
-func (c *APIClient) makeRequest(method, path string, body interface{}, response interface{}, token string) error {
+func (c *APIClient) makeRequest(method, path string, body, response interface{}, token string) error {
 	url := c.BaseURL + path
 
 	var reqBody io.Reader
@@ -333,7 +333,11 @@ func (c *APIClient) makeRequest(method, path string, body interface{}, response 
 	if err != nil {
 		return fmt.Errorf("failed to make request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Printf("Warning: failed to close response body: %v\n", closeErr)
+		}
+	}()
 
 	// Read response
 	respBody, err := io.ReadAll(resp.Body)

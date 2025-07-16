@@ -26,7 +26,7 @@ import (
 // These must match the constants in internal/oauth/server.go
 const (
 	CLIClientID     = "maigo-cli"
-	CLIClientSecret = "cli-client-secret-not-used-with-pkce" // Not used with PKCE but kept for completeness
+	CLIClientSecret = "cli-client-secret-not-used-with-pkce" // Not used with PKCE //nolint:gosec,G101
 	CLIRedirectURI  = "http://localhost:8000/callback"
 )
 
@@ -206,7 +206,8 @@ func (c *OAuthClient) startCallbackServer(
 	})
 
 	server := &http.Server{
-		Handler: mux,
+		Handler:           mux,
+		ReadHeaderTimeout: 30 * time.Second,
 	}
 
 	go func() {
@@ -227,12 +228,15 @@ func (c *OAuthClient) findAvailablePort(preferredPort string) (net.Listener, str
 	}
 
 	// If preferred port is not available, find any available port
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := net.Listen("tcp", "localhost:0") //nolint:gosec // localhost binding for OAuth callback
 	if err != nil {
 		return nil, "", err
 	}
 
-	addr := listener.Addr().(*net.TCPAddr)
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return nil, "", fmt.Errorf("failed to get TCP address")
+	}
 	actualPort := fmt.Sprintf("%d", addr.Port)
 
 	return listener, actualPort, nil
@@ -535,7 +539,11 @@ func (c *OAuthClient) exchangeCodeForTokens(code, codeVerifier string) (*models.
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code for tokens: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("Warning: failed to close response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token exchange failed with status %d", resp.StatusCode)

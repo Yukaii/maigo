@@ -83,7 +83,7 @@ benchmark:
 ## lint: Run linter
 lint:
 	@echo "Running linter..."
-	golangci-lint run --no-config --disable-all -E errcheck -E gosimple -E govet -E ineffassign -E unused -E gofmt -E goimports -E misspell ./...
+	golangci-lint run
 
 ## lint-full: Run full linter with config
 lint-full:

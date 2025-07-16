@@ -32,7 +32,7 @@ func main() {
 
 	// Seed CLI OAuth client
 	if err := seedCLIClient(ctx, db); err != nil {
-		log.Fatalf("Failed to seed CLI client: %v", err)
+		log.Fatalf("Failed to seed CLI client: %v", err) //nolint:gocritic // database connection will be closed by defer
 	}
 
 	// Seed test users (optional for development)

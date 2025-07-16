@@ -19,7 +19,7 @@ import (
 // Default CLI client constants - must match CLI package constants
 const (
 	DefaultCLIClientID     = "maigo-cli"
-	DefaultCLIClientSecret = "cli-client-secret-not-used-with-pkce"
+	DefaultCLIClientSecret = "cli-client-secret-not-used-with-pkce" //nolint:gosec // test secret for CLI client
 	DefaultCLIClientName   = "Maigo CLI Application"
 	DefaultCLIRedirectURI  = "http://localhost:8000/callback"
 )
@@ -84,15 +84,15 @@ type AuthorizeResponse struct {
 	State string `json:"state"`
 }
 
-// TokenErrorResponse represents an OAuth 2.0 error response
-type TokenErrorResponse struct {
+// TokenError represents an OAuth 2.0 error response
+type TokenError struct {
 	ErrorCode        string `json:"error"`
 	ErrorDescription string `json:"error_description,omitempty"`
 	ErrorURI         string `json:"error_uri,omitempty"`
 }
 
-// Error implements the error interface for TokenErrorResponse
-func (e *TokenErrorResponse) Error() string {
+// Error implements the error interface for TokenError
+func (e *TokenError) Error() string {
 	if e.ErrorDescription != "" {
 		return fmt.Sprintf("%s: %s", e.ErrorCode, e.ErrorDescription)
 	}
@@ -131,7 +131,7 @@ func (s *Server) ProcessAuthorizationRequest(
 ) (*AuthorizeResponse, error) {
 	// Validate response type
 	if req.ResponseType != ResponseTypeCode {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorUnsupportedResponseType,
 			ErrorDescription: "Only 'code' response type is supported",
 		}
@@ -140,7 +140,7 @@ func (s *Server) ProcessAuthorizationRequest(
 	// Validate client
 	client, err := s.getClient(ctx, req.ClientID)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidClient,
 			ErrorDescription: "Invalid client_id",
 		}
@@ -148,7 +148,7 @@ func (s *Server) ProcessAuthorizationRequest(
 
 	// Validate redirect URI
 	if !s.validateRedirectURI(client, req.RedirectURI) {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "Invalid redirect_uri",
 		}
@@ -158,7 +158,7 @@ func (s *Server) ProcessAuthorizationRequest(
 	if req.CodeChallenge != "" {
 		err = ValidateCodeChallenge(req.CodeChallenge)
 		if err != nil {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
 			}
@@ -171,7 +171,7 @@ func (s *Server) ProcessAuthorizationRequest(
 
 		err = ValidateCodeChallengeMethod(req.CodeChallengeMethod)
 		if err != nil {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
 			}
@@ -181,7 +181,7 @@ func (s *Server) ProcessAuthorizationRequest(
 	// Generate authorization code
 	authCode, err := GenerateAuthorizationCode()
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to generate authorization code",
 		}
@@ -201,7 +201,7 @@ func (s *Server) ProcessAuthorizationRequest(
 	})
 
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to store authorization code",
 		}
@@ -221,7 +221,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 ) (*AuthorizeResponse, error) {
 	// Validate response type
 	if req.ResponseType != ResponseTypeCode {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorUnsupportedResponseType,
 			ErrorDescription: "Only 'code' response type is supported",
 		}
@@ -230,7 +230,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 	// Validate client
 	client, err := s.getClient(ctx, req.ClientID)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidClient,
 			ErrorDescription: "Invalid client_id",
 		}
@@ -238,7 +238,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 
 	// Validate redirect URI
 	if !s.validateRedirectURI(client, req.RedirectURI) {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "Invalid redirect_uri",
 		}
@@ -248,7 +248,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 	if req.CodeChallenge != "" {
 		err = ValidateCodeChallenge(req.CodeChallenge)
 		if err != nil {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
 			}
@@ -261,7 +261,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 
 		err = ValidateCodeChallengeMethod(req.CodeChallengeMethod)
 		if err != nil {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
 			}
@@ -271,7 +271,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 	// Generate authorization code
 	authCode, err := GenerateAuthorizationCode()
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to generate authorization code",
 		}
@@ -292,7 +292,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 	})
 
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to store authorization code",
 		}
@@ -312,7 +312,7 @@ func (s *Server) ProcessTokenRequest(ctx context.Context, req *TokenRequest) (*T
 	case GrantTypeRefreshToken:
 		return s.processRefreshTokenGrant(ctx, req)
 	default:
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorUnsupportedGrantType,
 			ErrorDescription: fmt.Sprintf("Grant type '%s' is not supported", req.GrantType),
 		}
@@ -323,14 +323,14 @@ func (s *Server) ProcessTokenRequest(ctx context.Context, req *TokenRequest) (*T
 func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRequest) (*TokenPair, error) {
 	// Validate required parameters
 	if req.Code == "" {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "Missing required parameter: code",
 		}
 	}
 
 	if req.RedirectURI == "" {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "Missing required parameter: redirect_uri",
 		}
@@ -339,7 +339,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 	// Validate client
 	_, err := s.getClient(ctx, req.ClientID)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidClient,
 			ErrorDescription: "Invalid client_id",
 		}
@@ -348,7 +348,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 	// Get and validate authorization code
 	authCode, err := s.getAuthorizationCode(ctx, req.Code)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid or expired authorization code",
 		}
@@ -356,7 +356,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 	// Check if code is already used
 	if authCode.Used {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Authorization code already used",
 		}
@@ -364,7 +364,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 	// Check if code is expired
 	if time.Now().After(authCode.ExpiresAt) {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Authorization code expired",
 		}
@@ -372,7 +372,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 	// Validate client matches
 	if authCode.ClientID != req.ClientID {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Client mismatch",
 		}
@@ -380,7 +380,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 	// Validate redirect URI matches
 	if authCode.RedirectURI != req.RedirectURI {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Redirect URI mismatch",
 		}
@@ -389,7 +389,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 	// Validate PKCE if code challenge was provided
 	if authCode.CodeChallenge != "" {
 		if req.CodeVerifier == "" {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: "Missing required parameter: code_verifier",
 			}
@@ -397,7 +397,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 		err = ValidateCodeVerifier(req.CodeVerifier)
 		if err != nil {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidRequest,
 				ErrorDescription: fmt.Sprintf("Invalid code_verifier: %v", err),
 			}
@@ -405,7 +405,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 		// Verify PKCE challenge
 		if !VerifyCodeChallenge(req.CodeVerifier, authCode.CodeChallenge, authCode.CodeChallengeMethod) {
-			return nil, &TokenErrorResponse{
+			return nil, &TokenError{
 				ErrorCode:        ErrorInvalidGrant,
 				ErrorDescription: "PKCE verification failed",
 			}
@@ -413,8 +413,8 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 	}
 
 	// Mark authorization code as used
-	if err := s.markAuthorizationCodeUsed(ctx, req.Code); err != nil {
-		return nil, &TokenErrorResponse{
+	if markErr := s.markAuthorizationCodeUsed(ctx, req.Code); markErr != nil {
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to mark authorization code as used",
 		}
@@ -423,7 +423,7 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 	// Get user from authorization code
 	user, err := s.getUserByID(ctx, authCode.UserID)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "User not found",
 		}
@@ -485,7 +485,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 	})
 
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid refresh token",
 		}
@@ -493,15 +493,15 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid refresh token",
 		}
 	}
 
 	// Check if token type is refresh
-	if tokenType, ok := claims["type"]; !ok || tokenType != "refresh" {
-		return nil, &TokenErrorResponse{
+	if tokenType, tokenOk := claims["type"]; !tokenOk || tokenType != "refresh" {
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Token is not a refresh token",
 		}
@@ -510,7 +510,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 	// Extract user ID
 	userIDFloat, ok := claims["user_id"].(float64)
 	if !ok {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid user ID in refresh token",
 		}
@@ -520,7 +520,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 	// Get user
 	user, err := s.getUserByID(ctx, userID)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "User not found",
 		}
@@ -533,7 +533,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 // processRefreshTokenGrant processes refresh token grant
 func (s *Server) processRefreshTokenGrant(ctx context.Context, req *TokenRequest) (*TokenPair, error) {
 	if req.RefreshToken == "" {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "Missing required parameter: refresh_token",
 		}
@@ -577,7 +577,7 @@ func (s *Server) AuthenticateUser(ctx context.Context, username, password string
 	// Get user by username/email
 	user, err := s.getUserByUsernameOrEmail(ctx, username)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid username or password",
 		}
@@ -585,7 +585,7 @@ func (s *Server) AuthenticateUser(ctx context.Context, username, password string
 
 	// Verify password (assuming password is stored as hashed for now)
 	if user.PasswordHash != password {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid username or password",
 		}
@@ -604,7 +604,7 @@ func (s *Server) RegisterUser(ctx context.Context, username, email, password str
 		s.logger.Debug("User lookup failed during registration", "error", err)
 	}
 	if existingUser != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "User already exists",
 		}
@@ -626,7 +626,7 @@ func (s *Server) RegisterUser(ctx context.Context, username, email, password str
 	err = s.db.QueryRow(ctx, query, user.Username, user.Email, user.PasswordHash).
 		Scan(&user.ID, &user.CreatedAt)
 	if err != nil {
-		return nil, &TokenErrorResponse{
+		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to create user",
 		}
@@ -734,7 +734,8 @@ func (s *Server) storeAuthorizationCodeWithUser(ctx context.Context, authCode *m
 // getAuthorizationCode retrieves authorization code from database
 func (s *Server) getAuthorizationCode(ctx context.Context, code string) (*models.AuthorizationCode, error) {
 	query := `
-		SELECT code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, expires_at, used, created_at
+		SELECT code, client_id, user_id, redirect_uri, scope, code_challenge, 
+		       code_challenge_method, expires_at, used, created_at
 		FROM authorization_codes 
 		WHERE code = $1`
 

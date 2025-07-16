@@ -118,7 +118,7 @@ func (e *Encoder) GenerateCustom(custom string) (string, error) {
 
 // ValidateShortCode checks if a short code is valid
 func (e *Encoder) ValidateShortCode(shortCode string) error {
-	if len(shortCode) == 0 {
+	if shortCode == "" {
 		return fmt.Errorf("short code cannot be empty")
 	}
 

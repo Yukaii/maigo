@@ -142,8 +142,7 @@ func (r *URLRepository) Update(ctx context.Context, id int64, updates map[string
 	argIndex := 1
 
 	for field, value := range updates {
-		switch field {
-		case "target_url":
+		if field == "target_url" {
 			setParts = append(setParts, fmt.Sprintf("%s = $%d", field, argIndex))
 			args = append(args, value)
 			argIndex++

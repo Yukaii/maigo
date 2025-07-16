@@ -85,41 +85,32 @@ func (s *HTTPServer) setupRoutes() {
 
 	// OAuth 2.0 endpoints
 	oauth := s.engine.Group("/oauth")
-	{
-		oauth.GET("/authorize", oauthHandler.AuthorizeEndpoint)
-		oauth.POST("/authorize", oauthHandler.AuthorizePostEndpoint)
-		oauth.POST("/token", oauthHandler.TokenEndpoint)
-		oauth.POST("/revoke", oauthHandler.RevokeEndpoint)
-	}
+	oauth.GET("/authorize", oauthHandler.AuthorizeEndpoint)
+	oauth.POST("/authorize", oauthHandler.AuthorizePostEndpoint)
+	oauth.POST("/token", oauthHandler.TokenEndpoint)
+	oauth.POST("/revoke", oauthHandler.RevokeEndpoint)
 
 	// API v1 routes
 	v1 := s.engine.Group("/api/v1")
-	{
-		// URL shortening endpoints
-		urls := v1.Group("/urls")
-		{
-			urls.POST("", middleware.RateLimit(s.config.App.RateLimit), middleware.Auth(s.config), urlHandler.CreateShortURL)
-			urls.GET("/:code", urlHandler.GetURL)
-			urls.GET("/:code/stats", middleware.Auth(s.config), urlHandler.GetURLStats)
-			urls.DELETE("/:code", middleware.Auth(s.config), urlHandler.DeleteURL)
-		}
 
-		// Authentication endpoints (legacy - keeping for backward compatibility)
-		auth := v1.Group("/auth")
-		{
-			auth.POST("/register", authHandler.Register)
-			auth.POST("/login", authHandler.Login)
-			auth.POST("/token", authHandler.RefreshToken)
-			auth.POST("/logout", middleware.Auth(s.config), authHandler.Logout)
-		}
+	// URL shortening endpoints
+	urls := v1.Group("/urls")
+	urls.POST("", middleware.RateLimit(s.config.App.RateLimit), middleware.Auth(s.config), urlHandler.CreateShortURL)
+	urls.GET("/:code", urlHandler.GetURL)
+	urls.GET("/:code/stats", middleware.Auth(s.config), urlHandler.GetURLStats)
+	urls.DELETE("/:code", middleware.Auth(s.config), urlHandler.DeleteURL)
 
-		// Protected user endpoints
-		user := v1.Group("/user", middleware.Auth(s.config))
-		{
-			user.GET("/profile", authHandler.GetProfile)
-			user.GET("/urls", urlHandler.GetUserURLs)
-		}
-	}
+	// Authentication endpoints (legacy - keeping for backward compatibility)
+	auth := v1.Group("/auth")
+	auth.POST("/register", authHandler.Register)
+	auth.POST("/login", authHandler.Login)
+	auth.POST("/token", authHandler.RefreshToken)
+	auth.POST("/logout", middleware.Auth(s.config), authHandler.Logout)
+
+	// Protected user endpoints
+	user := v1.Group("/user", middleware.Auth(s.config))
+	user.GET("/profile", authHandler.GetProfile)
+	user.GET("/urls", urlHandler.GetUserURLs)
 
 	// Short URL redirect (should be on root domain)
 	s.engine.GET("/:code", urlHandler.RedirectShortURL)

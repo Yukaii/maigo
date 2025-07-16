@@ -56,33 +56,33 @@ func NewServerCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 // overrideConfigFromFlags overrides configuration values with command-line flags
 func overrideConfigFromFlags(cmd *cobra.Command, cfg *config.Config) error {
 	// Database configuration overrides
-	if databaseURL, _ := cmd.Flags().GetString("database-url"); databaseURL != "" {
+	if databaseURL, err := cmd.Flags().GetString("database-url"); err == nil && databaseURL != "" {
 		cfg.Database.URL = databaseURL
 	}
-	if dbHost, _ := cmd.Flags().GetString("db-host"); dbHost != "" {
+	if dbHost, err := cmd.Flags().GetString("db-host"); err == nil && dbHost != "" {
 		cfg.Database.Host = dbHost
 	}
-	if dbPort, _ := cmd.Flags().GetInt("db-port"); cmd.Flags().Changed("db-port") {
+	if dbPort, err := cmd.Flags().GetInt("db-port"); err == nil && cmd.Flags().Changed("db-port") {
 		cfg.Database.Port = dbPort
 	}
-	if dbName, _ := cmd.Flags().GetString("db-name"); dbName != "" {
+	if dbName, err := cmd.Flags().GetString("db-name"); err == nil && dbName != "" {
 		cfg.Database.Name = dbName
 	}
-	if dbUser, _ := cmd.Flags().GetString("db-user"); dbUser != "" {
+	if dbUser, err := cmd.Flags().GetString("db-user"); err == nil && dbUser != "" {
 		cfg.Database.User = dbUser
 	}
-	if dbPassword, _ := cmd.Flags().GetString("db-password"); dbPassword != "" {
+	if dbPassword, err := cmd.Flags().GetString("db-password"); err == nil && dbPassword != "" {
 		cfg.Database.Password = dbPassword
 	}
-	if dbSSLMode, _ := cmd.Flags().GetString("db-ssl-mode"); dbSSLMode != "" {
+	if dbSSLMode, err := cmd.Flags().GetString("db-ssl-mode"); err == nil && dbSSLMode != "" {
 		cfg.Database.SSLMode = dbSSLMode
 	}
 
 	// Server configuration overrides
-	if port, _ := cmd.Flags().GetInt("port"); cmd.Flags().Changed("port") {
+	if port, err := cmd.Flags().GetInt("port"); err == nil && cmd.Flags().Changed("port") {
 		cfg.Server.Port = port
 	}
-	if host, _ := cmd.Flags().GetString("host"); host != "" {
+	if host, err := cmd.Flags().GetString("host"); err == nil && host != "" {
 		cfg.Server.Host = host
 	}
 
@@ -147,7 +147,10 @@ func NewShortenCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 		Long:  "Create a short URL from a long URL",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			custom, _ := cmd.Flags().GetString("custom")
+			custom, err := cmd.Flags().GetString("custom")
+			if err != nil {
+				return fmt.Errorf("failed to get custom flag: %w", err)
+			}
 			return runCreateShortURL(cfg, log, args[0], custom)
 		},
 	}
@@ -165,9 +168,18 @@ func NewListCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 		Short: "List your short URLs",
 		Long:  "List all short URLs belonging to the authenticated user",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			page, _ := cmd.Flags().GetInt("page")
-			pageSize, _ := cmd.Flags().GetInt("page-size")
-			limit, _ := cmd.Flags().GetInt("limit")
+			page, err := cmd.Flags().GetInt("page")
+			if err != nil {
+				return fmt.Errorf("failed to get page flag: %w", err)
+			}
+			pageSize, err := cmd.Flags().GetInt("page-size")
+			if err != nil {
+				return fmt.Errorf("failed to get page-size flag: %w", err)
+			}
+			limit, err := cmd.Flags().GetInt("limit")
+			if err != nil {
+				return fmt.Errorf("failed to get limit flag: %w", err)
+			}
 			if limit > 0 {
 				pageSize = limit
 			}
@@ -192,7 +204,10 @@ func NewDeleteCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Add confirmation prompt for destructive operation
-			force, _ := cmd.Flags().GetBool("force")
+			force, err := cmd.Flags().GetBool("force")
+			if err != nil {
+				return fmt.Errorf("failed to get force flag: %w", err)
+			}
 			if !force {
 				fmt.Printf("Are you sure you want to delete short URL '%s'? (y/N): ", args[0])
 				var response string
@@ -497,14 +512,31 @@ func runRegister(cfg *config.Config, log *logger.Logger, username, email string)
 	}
 
 	// Extract tokens from response
-	if tokensInterface, ok := (*response)["tokens"]; ok {
+	if tokensInterface, ok := response["tokens"]; ok {
 		if tokensMap, ok := tokensInterface.(map[string]interface{}); ok {
 			// Convert to TokenResponse structure
+			accessToken, ok := tokensMap["access_token"].(string)
+			if !ok {
+				return fmt.Errorf("invalid access_token type")
+			}
+			refreshToken, ok := tokensMap["refresh_token"].(string)
+			if !ok {
+				return fmt.Errorf("invalid refresh_token type")
+			}
+			tokenType, ok := tokensMap["token_type"].(string)
+			if !ok {
+				return fmt.Errorf("invalid token_type type")
+			}
+			expiresInFloat, ok := tokensMap["expires_in"].(float64)
+			if !ok {
+				return fmt.Errorf("invalid expires_in type")
+			}
+
 			tokenResponse := &models.TokenResponse{
-				AccessToken:  tokensMap["access_token"].(string),
-				RefreshToken: tokensMap["refresh_token"].(string),
-				TokenType:    tokensMap["token_type"].(string),
-				ExpiresIn:    int(tokensMap["expires_in"].(float64)),
+				AccessToken:  accessToken,
+				RefreshToken: refreshToken,
+				TokenType:    tokenType,
+				ExpiresIn:    int(expiresInFloat),
 			}
 
 			// Save tokens
@@ -586,10 +618,10 @@ func runCreateShortURL(cfg *config.Config, log *logger.Logger, url, custom strin
 
 	// Display result
 	fmt.Printf("✅ Short URL created successfully!\n\n")
-	fmt.Printf("Original URL: %s\n", (*response)["url"])
-	fmt.Printf("Short Code:   %s\n", (*response)["short_code"])
-	fmt.Printf("Short URL:    %s\n", (*response)["short_url"])
-	fmt.Printf("Created:      %s\n", (*response)["created_at"])
+	fmt.Printf("Original URL: %s\n", response["url"])
+	fmt.Printf("Short Code:   %s\n", response["short_code"])
+	fmt.Printf("Short URL:    %s\n", response["short_url"])
+	fmt.Printf("Created:      %s\n", response["created_at"])
 
 	return nil
 }
@@ -663,13 +695,13 @@ func runGetURL(cfg *config.Config, log *logger.Logger, shortCode string) error {
 
 	// Display result
 	fmt.Printf("📋 URL Details for '%s'\n\n", shortCode)
-	fmt.Printf("Short Code:   %s\n", (*response)["short_code"])
-	fmt.Printf("Target URL:   %s\n", (*response)["url"])
-	fmt.Printf("Short URL:    %s\n", (*response)["short_url"])
-	fmt.Printf("Hits:         %v\n", (*response)["hits"])
-	fmt.Printf("Created:      %s\n", (*response)["created_at"])
+	fmt.Printf("Short Code:   %s\n", response["short_code"])
+	fmt.Printf("Target URL:   %s\n", response["url"])
+	fmt.Printf("Short URL:    %s\n", response["short_url"])
+	fmt.Printf("Hits:         %v\n", response["hits"])
+	fmt.Printf("Created:      %s\n", response["created_at"])
 
-	if updatedAt, ok := (*response)["updated_at"]; ok && updatedAt != nil {
+	if updatedAt, ok := response["updated_at"]; ok && updatedAt != nil {
 		fmt.Printf("Last Hit:     %s\n", updatedAt)
 	}
 
@@ -689,18 +721,18 @@ func runGetURLStats(cfg *config.Config, log *logger.Logger, shortCode string) er
 
 	// Display statistics
 	fmt.Printf("📊 Analytics for '%s'\n\n", shortCode)
-	fmt.Printf("Target URL:   %s\n", (*response)["url"])
-	fmt.Printf("Total Hits:   %v\n", (*response)["hits"])
-	fmt.Printf("Created:      %s\n", (*response)["created_at"])
+	fmt.Printf("Target URL:   %s\n", response["url"])
+	fmt.Printf("Total Hits:   %v\n", response["hits"])
+	fmt.Printf("Created:      %s\n", response["created_at"])
 
-	if lastHit, ok := (*response)["last_hit"]; ok && lastHit != nil {
+	if lastHit, ok := response["last_hit"]; ok && lastHit != nil {
 		fmt.Printf("Last Hit:     %s\n", lastHit)
 	} else {
 		fmt.Printf("Last Hit:     Never\n")
 	}
 
 	// Show hit timeline if available
-	if timeline, ok := (*response)["timeline"]; ok && timeline != nil {
+	if timeline, ok := response["timeline"]; ok && timeline != nil {
 		fmt.Printf("\n📈 Recent Activity:\n")
 		if timelineData, ok := timeline.([]interface{}); ok {
 			for _, entry := range timelineData {

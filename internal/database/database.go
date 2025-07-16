@@ -68,9 +68,9 @@ func RunMigrations(pool *pgxpool.Pool) error {
 	// Convert pgx connection to sql.DB for migrate
 	db := stdlib.OpenDBFromPool(pool)
 	defer func() {
-		if err := db.Close(); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
 			// Log error but don't fail the migration process
-			fmt.Printf("Warning: failed to close database connection: %v\n", err)
+			fmt.Printf("Warning: failed to close database connection: %v\n", closeErr)
 		}
 	}()
 
