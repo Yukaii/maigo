@@ -717,10 +717,6 @@ func runGetURL(cfg *config.Config, log *logger.Logger, shortCode string) error {
 	fmt.Printf("Hits:         %v\n", response["hits"])
 	fmt.Printf("Created:      %s\n", response["created_at"])
 
-	if updatedAt, ok := response["updated_at"]; ok && updatedAt != nil {
-		fmt.Printf("Last Hit:     %s\n", updatedAt)
-	}
-
 	return nil
 }
 

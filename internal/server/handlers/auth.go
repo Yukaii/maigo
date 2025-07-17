@@ -218,9 +218,9 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 
 	// Get user details from database
 	var username, email string
-	var createdAt, updatedAt string
-	query := `SELECT username, email, created_at, updated_at FROM users WHERE id = $1`
-	err := h.db.QueryRow(c.Request.Context(), query, userID).Scan(&username, &email, &createdAt, &updatedAt)
+	var createdAt string
+	query := `SELECT username, email, created_at FROM users WHERE id = $1`
+	err := h.db.QueryRow(c.Request.Context(), query, userID).Scan(&username, &email, &createdAt)
 	if err != nil {
 		h.logger.Error("Failed to get user profile", "user_id", userID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -235,6 +235,5 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 		"username":   username,
 		"email":      email,
 		"created_at": createdAt,
-		"updated_at": updatedAt,
 	})
 }
