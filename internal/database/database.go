@@ -13,6 +13,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq" // PostgreSQL driver for golang-migrate
 
 	"github.com/yukaii/maigo/internal/config"
 )

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq" // PostgreSQL driver for golang-migrate
 
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"

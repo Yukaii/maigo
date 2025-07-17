@@ -269,15 +269,31 @@ func NewMigrateCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 		Long:  "Run database migrations",
 	}
 
+	// Create migrate up command with database flags
+	upCmd := &cobra.Command{
+		Use:   "up",
+		Short: "Run all pending migrations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Override config with command-line flags if provided
+			if err := overrideConfigFromFlags(cmd, cfg); err != nil {
+				return fmt.Errorf("failed to override config from flags: %w", err)
+			}
+			return runMigrations(cfg, log)
+		},
+	}
+
+	// Add database configuration flags to migrate up command
+	upCmd.Flags().String("database-url", "", "Database connection URL (overrides individual DB flags)")
+	upCmd.Flags().String("db-host", "", "Database host")
+	upCmd.Flags().Int("db-port", 0, "Database port")
+	upCmd.Flags().String("db-name", "", "Database name")
+	upCmd.Flags().String("db-user", "", "Database user")
+	upCmd.Flags().String("db-password", "", "Database password")
+	upCmd.Flags().String("db-ssl-mode", "", "Database SSL mode (disable, require, etc.)")
+
 	// Add subcommands
 	cmd.AddCommand(
-		&cobra.Command{
-			Use:   "up",
-			Short: "Run all pending migrations",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return runMigrations(cfg, log)
-			},
-		},
+		upCmd,
 		&cobra.Command{
 			Use:   "status",
 			Short: "Show migration status",

@@ -83,11 +83,11 @@ jobs:
           sleep 1
         done
 
-        # Install migrate tool
-        go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+        # Build the maigo binary with proper PostgreSQL driver
+        go build -o bin/maigo ./cmd/maigo
 
-        # Run migrations
-        migrate -path internal/database/migrations -database "postgres://postgres:password@localhost:5432/maigo_test?sslmode=disable" up
+        # Run migrations using the built-in migrate command with environment variables
+        DATABASE_URL="postgres://postgres:password@localhost:5432/maigo_test?sslmode=disable" ./bin/maigo migrate up
 
     - name: Run integration tests
       env:
