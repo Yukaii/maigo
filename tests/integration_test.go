@@ -27,10 +27,10 @@ import (
 // IntegrationTestSuite contains integration tests for the URL shortener
 type IntegrationTestSuite struct {
 	suite.Suite
-	server *server.HTTPServer
-	db     *pgxpool.Pool
-	config *config.Config
-	logger *logger.Logger
+	server   *server.HTTPServer
+	db       *pgxpool.Pool
+	config   *config.Config
+	logger   *logger.Logger
 	testUser *models.User
 }
 
@@ -46,7 +46,7 @@ func (suite *IntegrationTestSuite) createTestJWT(userID int64, username string, 
 		"iss":      "maigo-oauth2",
 		"aud":      "maigo-api",
 	}
-	
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(suite.config.JWT.Secret))
 	require.NoError(suite.T(), err)
@@ -59,17 +59,17 @@ func (suite *IntegrationTestSuite) createTestUser() *models.User {
 		Username: "testuser",
 		Email:    "test@example.com",
 	}
-	
+
 	// Use a dummy password hash for testing
 	passwordHash := "$2a$10$dummypasswordhashfortesting"
-	
+
 	err := suite.db.QueryRow(
 		context.Background(),
 		"INSERT INTO users (username, email, password_hash, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id",
 		user.Username, user.Email, passwordHash,
 	).Scan(&user.ID)
 	require.NoError(suite.T(), err)
-	
+
 	return user
 }
 
@@ -78,12 +78,12 @@ func (suite *IntegrationTestSuite) createAuthenticatedRequest(method, url string
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	
+
 	if suite.testUser != nil {
 		token := suite.createTestJWT(suite.testUser.ID, suite.testUser.Username, suite.testUser.Email)
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	
+
 	return req
 }
 
@@ -143,7 +143,7 @@ func (suite *IntegrationTestSuite) SetupTest() {
 	require.NoError(suite.T(), err)
 	_, err = suite.db.Exec(context.Background(), "DELETE FROM users")
 	require.NoError(suite.T(), err)
-	
+
 	// Create test user for authenticated requests
 	suite.testUser = suite.createTestUser()
 }
@@ -179,7 +179,7 @@ func (suite *IntegrationTestSuite) TestHealthEndpoints() {
 			var response map[string]interface{}
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			require.NoError(suite.T(), err)
-			
+
 			// Different endpoints return different status values
 			if tt.endpoint == "/health" {
 				assert.Equal(suite.T(), "ok", response["status"])
@@ -538,7 +538,7 @@ func (suite *IntegrationTestSuite) TestInvalidRoutes() {
 			var errorResponse models.ErrorResponse
 			err := json.Unmarshal(w.Body.Bytes(), &errorResponse)
 			require.NoError(suite.T(), err)
-			
+
 			if tt.expected == http.StatusBadRequest {
 				assert.Equal(suite.T(), "Bad Request", errorResponse.Error)
 			} else {
