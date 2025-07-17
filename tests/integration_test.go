@@ -35,7 +35,7 @@ type IntegrationTestSuite struct {
 }
 
 // Test JWT helpers
-func (suite *IntegrationTestSuite) createTestJWT(userID int64, username string, email string) string {
+func (suite *IntegrationTestSuite) createTestJWT(userID int64, username, email string) string {
 	claims := jwt.MapClaims{
 		"user_id":  userID,
 		"username": username,
@@ -73,8 +73,8 @@ func (suite *IntegrationTestSuite) createTestUser() *models.User {
 	return user
 }
 
-func (suite *IntegrationTestSuite) createAuthenticatedRequest(method, url string, body []byte) *http.Request {
-	req := httptest.NewRequest(method, url, bytes.NewBuffer(body))
+func (suite *IntegrationTestSuite) createAuthenticatedRequest(body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/urls", bytes.NewBuffer(body))
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -244,7 +244,7 @@ func (suite *IntegrationTestSuite) TestCreateShortURL() {
 			body, err := json.Marshal(tt.requestBody)
 			require.NoError(suite.T(), err)
 
-			req := suite.createAuthenticatedRequest(http.MethodPost, "/api/v1/urls", body)
+			req := suite.createAuthenticatedRequest(body)
 			w := httptest.NewRecorder()
 
 			suite.server.ServeHTTP(w, req)
@@ -271,7 +271,9 @@ func (suite *IntegrationTestSuite) TestCreateShortURL() {
 					assert.Equal(suite.T(), tt.requestBody.Custom, urlResponse["short_code"])
 				} else {
 					assert.NotEmpty(suite.T(), urlResponse["short_code"])
-					assert.Len(suite.T(), urlResponse["short_code"].(string), 6) // Default length
+					shortCode, ok := urlResponse["short_code"].(string)
+					require.True(suite.T(), ok, "short_code should be a string")
+					assert.Len(suite.T(), shortCode, 6) // Default length
 				}
 			}
 		})
@@ -288,7 +290,7 @@ func (suite *IntegrationTestSuite) TestGetURL() {
 	body, err := json.Marshal(createReq)
 	require.NoError(suite.T(), err)
 
-	req := suite.createAuthenticatedRequest(http.MethodPost, "/api/v1/urls", body)
+	req := suite.createAuthenticatedRequest(body)
 	w := httptest.NewRecorder()
 	suite.server.ServeHTTP(w, req)
 	require.Equal(suite.T(), http.StatusCreated, w.Code)
@@ -349,7 +351,7 @@ func (suite *IntegrationTestSuite) TestRedirectShortURL() {
 	body, err := json.Marshal(createReq)
 	require.NoError(suite.T(), err)
 
-	req := suite.createAuthenticatedRequest(http.MethodPost, "/api/v1/urls", body)
+	req := suite.createAuthenticatedRequest(body)
 	w := httptest.NewRecorder()
 	suite.server.ServeHTTP(w, req)
 	require.Equal(suite.T(), http.StatusCreated, w.Code)
@@ -406,7 +408,7 @@ func (suite *IntegrationTestSuite) TestHitTracking() {
 	body, err := json.Marshal(createReq)
 	require.NoError(suite.T(), err)
 
-	req := suite.createAuthenticatedRequest(http.MethodPost, "/api/v1/urls", body)
+	req := suite.createAuthenticatedRequest(body)
 	w := httptest.NewRecorder()
 	suite.server.ServeHTTP(w, req)
 	require.Equal(suite.T(), http.StatusCreated, w.Code)
@@ -464,7 +466,7 @@ func (suite *IntegrationTestSuite) TestConcurrentURLCreation() {
 					continue
 				}
 
-				req := suite.createAuthenticatedRequest(http.MethodPost, "/api/v1/urls", body)
+				req := suite.createAuthenticatedRequest(body)
 				w := httptest.NewRecorder()
 
 				suite.server.ServeHTTP(w, req)
@@ -584,7 +586,7 @@ func (suite *IntegrationTestSuite) TestShortCodeGeneration() {
 		body, err := json.Marshal(createReq)
 		require.NoError(suite.T(), err)
 
-		req := suite.createAuthenticatedRequest(http.MethodPost, "/api/v1/urls", body)
+		req := suite.createAuthenticatedRequest(body)
 		w := httptest.NewRecorder()
 
 		suite.server.ServeHTTP(w, req)
@@ -594,7 +596,8 @@ func (suite *IntegrationTestSuite) TestShortCodeGeneration() {
 		err = json.Unmarshal(w.Body.Bytes(), &urlResponse)
 		require.NoError(suite.T(), err)
 
-		shortCode := urlResponse["short_code"].(string)
+		shortCode, ok := urlResponse["short_code"].(string)
+		require.True(suite.T(), ok, "short_code should be a string")
 		shortCodes = append(shortCodes, shortCode)
 
 		// Verify short code properties
