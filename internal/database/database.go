@@ -93,6 +93,13 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to create migrate instance: %w", err)
 	}
 
+	// Ensure migrate instance is properly closed
+	defer func() {
+		if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+			fmt.Printf("Warning: failed to close migrate instance (source: %v, db: %v)\n", sourceErr, dbErr)
+		}
+	}()
+
 	// Run migrations
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("failed to run migrations: %w", err)

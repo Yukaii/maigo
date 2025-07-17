@@ -76,29 +76,13 @@ jobs:
     - name: Set up test environment
       env:
         PGPASSWORD: password
+        DATABASE_URL: postgres://postgres:password@localhost:5432/maigo_test?sslmode=disable
       run: |
-        # Wait for PostgreSQL to be ready with timeout
-        echo "Waiting for PostgreSQL to be ready..."
-        for i in {1..30}; do
-          if pg_isready -h localhost -p 5432 -U postgres; then
-            echo "PostgreSQL is ready!"
-            break
-          fi
-          echo "Attempt $i: PostgreSQL not ready yet, waiting..."
-          sleep 2
-        done
-
-        # Verify PostgreSQL is actually ready
-        if ! pg_isready -h localhost -p 5432 -U postgres; then
-          echo "PostgreSQL failed to start within timeout"
-          exit 1
-        fi
-
-        # Build the maigo binary with proper PostgreSQL driver
-        go build -o bin/maigo ./cmd/maigo
-
-        # Run migrations using the built-in migrate command with environment variables
-        DATABASE_URL="postgres://postgres:password@localhost:5432/maigo_test?sslmode=disable" ./bin/maigo migrate up
+        # Wait for PostgreSQL to be ready
+        timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres; do sleep 1; done'
+        
+        # Run migrations
+        go run ./cmd/maigo migrate up
 
     - name: Run integration tests
       env:
