@@ -33,10 +33,7 @@ builds:
 
 # Archive configuration
 archives:
-  - id: maigo-archive
-    format_overrides:
-      - goos: windows
-        format: zip
+  - id: default
     name_template: "maigo_{{.Version}}_{{.Os}}_{{.Arch}}"
     files:
       - README.md
@@ -116,25 +113,8 @@ changelog:
     - title: "🔧 Other Changes"
       order: 999
 
-# Homebrew tap configuration
-homebrew:
-  - repository:
-      owner: yukaii
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    url_template: "https://github.com/yukaii/maigo/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    directory: Formula
-    homepage: "https://github.com/yukaii/maigo"
-    description: "A modern terminal-first URL shortener with OAuth2 authentication"
-    license: "MIT"
-    test: |
-      system "#{bin}/maigo --version"
-    extra_install: |
-      # Install example configuration
-      (etc/"maigo").install "maigo.example.yaml" => "maigo.yaml" if build.head?
-    install: |
-      bin.install "maigo"
-      etc.install "maigo.example.yaml"
+# Note: Homebrew tap configuration removed due to deprecation in GoReleaser v2
+# For Homebrew publishing, consider using external tools or custom publishers
 
 # Linux packages (deb, rpm, apk)
 nfpms:

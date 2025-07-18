@@ -32,7 +32,7 @@ setup:
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 	go install golang.org/x/tools/cmd/goimports@latest
-	go install github.com/goreleaser/goreleaser@latest
+	go install github.com/goreleaser/goreleaser/v2@latest
 	@echo "Setup complete! Edit .env file with your configuration."
 
 ## build: Build the binary
@@ -167,7 +167,7 @@ install-tools:
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/swaggo/swag/cmd/swag@latest
-	go install github.com/goreleaser/goreleaser@latest
+	go install github.com/goreleaser/goreleaser/v2@latest
 
 ## check: Run all quality checks
 check: fmt-check lint test
@@ -216,6 +216,12 @@ validate-release:
 check-goreleaser:
 	@echo "Checking GoReleaser configuration..."
 	goreleaser check
+
+## update-goreleaser: Update GoReleaser to v2 and validate
+update-goreleaser:
+	@echo "Updating GoReleaser to v2..."
+	@chmod +x scripts/update-and-validate.sh
+	./scripts/update-and-validate.sh
 
 ## docker: Build Docker container
 docker:
