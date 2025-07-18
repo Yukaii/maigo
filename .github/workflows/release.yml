@@ -24,6 +24,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get build info
+        id: build_info
+        run: |
+          echo "build_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          echo "short_sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
       - name: Build and Release Binaries
         uses: wangyoucao577/go-release-action@v1
         with:
@@ -33,7 +39,7 @@ jobs:
           goversion: '1.23'
           project_path: ./cmd/maigo
           binary_name: maigo
-          ldflags: -s -w -X github.com/yukaii/maigo/cmd/maigo.version=${{ github.ref_name }} -X github.com/yukaii/maigo/cmd/maigo.commit=${{ github.sha }} -X github.com/yukaii/maigo/cmd/maigo.date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          ldflags: -s -w -X github.com/yukaii/maigo/cmd/maigo.version=${{ github.ref_name }} -X github.com/yukaii/maigo/cmd/maigo.commit=${{ steps.build_info.outputs.short_sha }} -X github.com/yukaii/maigo/cmd/maigo.date=${{ steps.build_info.outputs.build_time }}
           extra_files: LICENSE README.md
           sha256sum: true
           md5sum: true
