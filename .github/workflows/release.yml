@@ -43,28 +43,26 @@ jobs:
         GOARCH: ${{ matrix.goarch }}
         CGO_ENABLED: 0
       run: |
-        VERSION=${GITHUB_REF#refs/tags/}
-        BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        GIT_COMMIT=$(git rev-parse --short HEAD)
+          VERSION=${GITHUB_REF#refs/tags/}
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          GIT_COMMIT=$(git rev-parse --short HEAD)
 
-        LDFLAGS="-ldflags -s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY_NAME="maigo-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.exe"
+          else
+            BINARY_NAME="maigo-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          fi
 
-        if [ "${{ matrix.goos }}" = "windows" ]; then
-          BINARY_NAME="maigo-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}.exe"
-        else
-          BINARY_NAME="maigo-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
-        fi
+          mkdir -p dist
+          go build -ldflags="-s -w -X github.com/yukaii/maigo/cmd/maigo.version=${VERSION} -X github.com/yukaii/maigo/cmd/maigo.commit=${GIT_COMMIT} -X github.com/yukaii/maigo/cmd/maigo.date=${BUILD_TIME}" -o dist/${BINARY_NAME} ./cmd/maigo
 
-        mkdir -p dist
-        go build ${LDFLAGS} -o dist/${BINARY_NAME} ./cmd/maigo
-
-        # Create tarball for non-windows
-        if [ "${{ matrix.goos }}" != "windows" ]; then
-          cd dist
-          tar -czf ${BINARY_NAME}.tar.gz ${BINARY_NAME}
-          rm ${BINARY_NAME}
-          cd ..
-        fi
+          # Create tarball for non-windows
+          if [ "${{ matrix.goos }}" != "windows" ]; then
+            cd dist
+            tar -czf ${BINARY_NAME}.tar.gz ${BINARY_NAME}
+            rm ${BINARY_NAME}
+            cd ..
+          fi
 
     - name: Upload release assets
       uses: softprops/action-gh-release@v2
