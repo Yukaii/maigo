@@ -1,0 +1,194 @@
+# GoReleaser configuration for Maigo
+# Reference: https://goreleaser.com/customization/
+
+project_name: maigo
+
+# Build configuration
+builds:
+  - id: maigo
+    main: ./cmd/maigo
+    binary: maigo
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Exclude unsupported combinations
+    ignore:
+      - goos: windows
+        goarch: arm64
+    # Build flags
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.FullCommit}}
+      - -X main.date={{.Date}}
+
+# Archive configuration
+archives:
+  - id: maigo-archive
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "maigo_{{.Version}}_{{.Os}}_{{.Arch}}"
+    files:
+      - README.md
+      - LICENSE*
+      - maigo.example.yaml
+
+# Checksum configuration
+checksum:
+  name_template: "maigo_{{.Version}}_checksums.txt"
+
+# Snapshot configuration (for non-tag builds)
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+# Release configuration
+release:
+  github:
+    owner: yukaii
+    name: maigo
+  name_template: "Maigo {{.Version}}"
+  header: |
+    ## Maigo {{.Version}}
+    
+    Welcome to this new release of Maigo! 🎉
+    
+    Maigo is a modern terminal-first URL shortener with OAuth2 authentication.
+  footer: |
+    ## Installation
+    
+    ### Download Binary
+    
+    Download the appropriate binary for your platform from the assets below.
+    
+    ### Using Go Install
+    
+    ```bash
+    go install github.com/yukaii/maigo/cmd/maigo@{{.Tag}}
+    ```
+    
+    ### Using Homebrew (macOS/Linux)
+    
+    ```bash
+    brew install yukaii/tap/maigo
+    ```
+    
+    ## What's Changed
+    
+    See the [full changelog](https://github.com/yukaii/maigo/compare/{{.PreviousTag}}...{{.Tag}}).
+  draft: false
+  prerelease: auto
+  make_latest: true
+
+# Changelog configuration
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+      - "^refactor:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: "🚀 Features"
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "📚 Documentation"
+      regexp: "^.*docs[(\\w)]*:+.*$"
+      order: 2
+    - title: "🔧 Other Changes"
+      order: 999
+
+# Homebrew tap configuration
+brews:
+  - name: maigo
+    repository:
+      owner: yukaii
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    url_template: "https://github.com/yukaii/maigo/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    directory: Formula
+    homepage: "https://github.com/yukaii/maigo"
+    description: "A modern terminal-first URL shortener with OAuth2 authentication"
+    license: "MIT"
+    test: |
+      system "#{bin}/maigo --version"
+    extra_install: |
+      # Install example configuration
+      (etc/"maigo").install "maigo.example.yaml" => "maigo.yaml" if build.head?
+    install: |
+      bin.install "maigo"
+      etc.install "maigo.example.yaml"
+
+# Linux packages (deb, rpm, apk)
+nfpms:
+  - id: maigo-packages
+    package_name: maigo
+    vendor: Yukaii
+    homepage: https://github.com/yukaii/maigo
+    maintainer: Yukaii <yukai.huang@gmail.com>
+    description: |
+      A modern terminal-first URL shortener with OAuth2 authentication.
+      Maigo provides imperative CLI commands for direct URL management and analytics.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    section: utils
+    contents:
+      - src: maigo.example.yaml
+        dst: /etc/maigo/maigo.example.yaml
+        type: config
+    scripts:
+      postinstall: |
+        echo "Maigo has been installed successfully!"
+        echo "Example config: /etc/maigo/maigo.example.yaml"
+        echo "Run 'maigo --help' to get started."
+
+# Docker images
+dockers:
+  - image_templates:
+      - "ghcr.io/yukaii/maigo:latest"
+      - "ghcr.io/yukaii/maigo:{{ .Tag }}"
+      - "ghcr.io/yukaii/maigo:v{{ .Major }}"
+      - "ghcr.io/yukaii/maigo:v{{ .Major }}.{{ .Minor }}"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - --label=org.opencontainers.image.title={{.ProjectName}}
+      - --label=org.opencontainers.image.description=A modern terminal-first URL shortener
+      - --label=org.opencontainers.image.url=https://github.com/yukaii/maigo
+      - --label=org.opencontainers.image.source=https://github.com/yukaii/maigo
+      - --label=org.opencontainers.image.version={{.Version}}
+      - --label=org.opencontainers.image.created={{.Date}}
+      - --label=org.opencontainers.image.revision={{.FullCommit}}
+      - --label=org.opencontainers.image.licenses=MIT
+
+# SBOMs (Software Bill of Materials)
+sboms:
+  - artifacts: archive
+
+# Metadata
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+
+# Report sizes
+report_sizes: true

@@ -3,6 +3,55 @@
 
 Maigo is a **terminal-first URL shortener** built with Go, designed for a geek-focused, CLI-first experience. It features a modern Go project structure, secure OAuth 2.0 authentication (with PKCE for CLI), and production-ready architecture with PostgreSQL and comprehensive testing.
 
+## Installation
+
+### Download Binary (Recommended)
+
+Download the latest release for your platform from the [Releases page](https://github.com/yukaii/maigo/releases).
+
+```bash
+# Example for Linux/macOS
+curl -L https://github.com/yukaii/maigo/releases/latest/download/maigo_<version>_<os>_<arch>.tar.gz | tar xz
+sudo mv maigo /usr/local/bin/
+```
+
+### Using Go Install
+
+```bash
+go install github.com/yukaii/maigo/cmd/maigo@latest
+```
+
+### Using Homebrew (macOS/Linux)
+
+```bash
+brew install yukaii/tap/maigo
+```
+
+### Docker
+
+```bash
+# Run server
+docker run -p 8080:8080 ghcr.io/yukaii/maigo:latest server
+
+# Run CLI commands
+docker run ghcr.io/yukaii/maigo:latest --help
+```
+
+### Linux Packages
+
+Download `.deb`, `.rpm`, or `.apk` packages from the [Releases page](https://github.com/yukaii/maigo/releases).
+
+```bash
+# Debian/Ubuntu
+sudo dpkg -i maigo_<version>_linux_amd64.deb
+
+# RHEL/CentOS/Fedora
+sudo rpm -i maigo_<version>_linux_amd64.rpm
+
+# Alpine
+sudo apk add --allow-untrusted maigo_<version>_linux_amd64.apk
+```
+
 ## Quick Start
 
 ```bash

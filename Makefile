@@ -32,6 +32,7 @@ setup:
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 	go install golang.org/x/tools/cmd/goimports@latest
+	go install github.com/goreleaser/goreleaser@latest
 	@echo "Setup complete! Edit .env file with your configuration."
 
 ## build: Build the binary
@@ -166,6 +167,7 @@ install-tools:
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/swaggo/swag/cmd/swag@latest
+	go install github.com/goreleaser/goreleaser@latest
 
 ## check: Run all quality checks
 check: fmt-check lint test
@@ -189,9 +191,25 @@ build-windows: clean
 	@echo "Building for Windows..."
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PACKAGE)
 
-## release: Build release binaries for all platforms
-release: build-linux build-darwin build-windows
-	@echo "Release binaries built in dist/"
+## release: Build release binaries for all platforms using GoReleaser
+release:
+	@echo "Building release with GoReleaser..."
+	goreleaser release --clean
+
+## release-snapshot: Build snapshot release without publishing
+release-snapshot:
+	@echo "Building snapshot release with GoReleaser..."
+	goreleaser release --snapshot --clean
+
+## release-dry: Test release build without publishing
+release-dry:
+	@echo "Testing release build with GoReleaser..."
+	goreleaser release --snapshot --clean --skip=publish
+
+## validate-release: Validate GoReleaser configuration and test build
+validate-release:
+	@echo "Validating release configuration..."
+	./scripts/validate-release.sh
 
 ## docker: Build Docker container
 docker:
