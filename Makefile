@@ -209,7 +209,13 @@ release-dry:
 ## validate-release: Validate GoReleaser configuration and test build
 validate-release:
 	@echo "Validating release configuration..."
+	@chmod +x scripts/validate-release.sh
 	./scripts/validate-release.sh
+
+## check-goreleaser: Quick check of GoReleaser configuration
+check-goreleaser:
+	@echo "Checking GoReleaser configuration..."
+	goreleaser check
 
 ## docker: Build Docker container
 docker:

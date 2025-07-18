@@ -4,6 +4,31 @@ This document outlines the release process for Maigo using GitHub Actions and Go
 
 ## Overview
 
+Maigo uses [GoReleaser](https://goreleaser.com/) v2 to automate the build and release process. The release workflow supports:
+
+- Multi-platform binaries (Linux, macOS, Windows)
+- Multi-architecture support (amd64, arm64)
+- Docker images published to GitHub Container Registry
+- Linux packages (deb, rpm, apk)
+- Homebrew tap support (optional)
+- Automated changelog generation
+- Checksums and SBOMs
+
+## Recent Fixes
+
+The configuration has been updated to fix several issues:
+
+- **Version 2 Format**: Updated to GoReleaser v2 configuration format
+- **Deprecated Fields**: Fixed deprecated `snapshot.name_template`, `archives.format`, and `brews` fields
+- **External Scripts**: Moved nfpm postinstall script to external file for better reliability
+- **License File**: Added MIT license file for archive inclusion
+
+## Release Types Documentation
+
+This document outlines the release process for Maigo using GitHub Actions and GoReleaser.
+
+## Overview
+
 Maigo uses [GoReleaser](https://goreleaser.com/) to automate the build and release process. The release workflow supports:
 
 - Multi-platform binaries (Linux, macOS, Windows)
@@ -181,6 +206,18 @@ Version information is embedded in the binary using Go's ldflags:
 3. **Missing GITHUB_TOKEN permissions**
    - Ensure workflow has correct permissions in YAML
    - Check repository settings for Actions permissions
+
+4. **Configuration version errors**
+   - GoReleaser v2 requires `version: 2` in configuration
+   - Update deprecated fields: `snapshot.name_template` → `snapshot.version_template`, `brews` → `homebrew`
+
+5. **NFPM script errors**
+   - Use external script files instead of inline scripts for postinstall
+   - Ensure script files have proper permissions and exist
+
+6. **Missing LICENSE files in archives**
+   - Ensure LICENSE file exists in repository root
+   - Reference correct filename in archives configuration
 
 ### Debugging
 - Check GitHub Actions logs for detailed error messages

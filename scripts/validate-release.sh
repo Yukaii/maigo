@@ -22,10 +22,23 @@ echo "🏗️ Testing build (snapshot mode)..."
 goreleaser build --snapshot --clean --single-target
 
 # Check if binary was built successfully
-if [ -f "dist/maigo_linux_amd64_v1/maigo" ]; then
+if [ -f "dist/maigo_linux_amd64_v1/maigo" ] || [ -f "dist/maigo_darwin_amd64_v1/maigo" ] || [ -f "dist/maigo_darwin_arm64_v8.0/maigo" ]; then
     echo "✅ Build successful!"
     echo "📦 Testing binary..."
-    ./dist/maigo_linux_amd64_v1/maigo --version
+    
+    # Find and test the binary
+    BINARY=""
+    if [ -f "dist/maigo_linux_amd64_v1/maigo" ]; then
+        BINARY="dist/maigo_linux_amd64_v1/maigo"
+    elif [ -f "dist/maigo_darwin_amd64_v1/maigo" ]; then
+        BINARY="dist/maigo_darwin_amd64_v1/maigo"
+    elif [ -f "dist/maigo_darwin_arm64_v8.0/maigo" ]; then
+        BINARY="dist/maigo_darwin_arm64_v8.0/maigo"
+    fi
+    
+    if [ -n "$BINARY" ]; then
+        ./$BINARY --version
+    fi
 else
     echo "❌ Build failed - binary not found"
     exit 1

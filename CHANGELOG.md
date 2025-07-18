@@ -9,20 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - GitHub Actions workflow for automated releases
-- GoReleaser configuration for multi-platform builds
+- GoReleaser v2 configuration for multi-platform builds
 - Docker image publishing to GitHub Container Registry
 - Linux packages (deb, rpm, apk)
 - Homebrew tap support (optional)
 - Automated changelog generation
 - Comprehensive release documentation
+- MIT License file
 
 ### Changed
 - Separated CI and release workflows for better organization
-- Updated build process to use GoReleaser
+- Updated build process to use GoReleaser v2
 - Improved Dockerfile for minimal production images
+- Fixed deprecated GoReleaser configuration fields
+- Moved nfpm postinstall script to external file
+
+### Fixed
+- GoReleaser v2 compatibility issues
+- Deprecated configuration warnings
+- NFPM script execution errors
+- Missing LICENSE file in archives
 
 ### Developer Experience
 - Added `make validate-release` command
+- Added `make check-goreleaser` for quick validation
 - Added `make release-snapshot` for testing
 - Added `make release-dry` for configuration testing
 - Updated setup process to include GoReleaser

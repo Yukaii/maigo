@@ -1,5 +1,6 @@
 # GoReleaser configuration for Maigo
 # Reference: https://goreleaser.com/customization/
+version: 2
 
 project_name: maigo
 
@@ -33,14 +34,13 @@ builds:
 # Archive configuration
 archives:
   - id: maigo-archive
-    format: tar.gz
     format_overrides:
       - goos: windows
         format: zip
     name_template: "maigo_{{.Version}}_{{.Os}}_{{.Arch}}"
     files:
       - README.md
-      - LICENSE*
+      - LICENSE
       - maigo.example.yaml
 
 # Checksum configuration
@@ -49,7 +49,7 @@ checksum:
 
 # Snapshot configuration (for non-tag builds)
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 # Release configuration
 release:
@@ -117,9 +117,8 @@ changelog:
       order: 999
 
 # Homebrew tap configuration
-brews:
-  - name: maigo
-    repository:
+homebrew:
+  - repository:
       owner: yukaii
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
@@ -159,10 +158,7 @@ nfpms:
         dst: /etc/maigo/maigo.example.yaml
         type: config
     scripts:
-      postinstall: |
-        echo "Maigo has been installed successfully!"
-        echo "Example config: /etc/maigo/maigo.example.yaml"
-        echo "Run 'maigo --help' to get started."
+      postinstall: scripts/postinstall.sh
 
 # Docker images
 dockers:
