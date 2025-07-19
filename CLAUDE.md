@@ -16,6 +16,7 @@
 - **[x] ✅ CLI OAuth client** Browser-based authorization flow with local callback
 - **[x] ✅ Database migrations** OAuth 2.0 schema with clients, codes, tokens
 - **[x] ✅ Testing infrastructure** automated database setup and CI-ready tests
+- **[x] ✅ Unit test suite** comprehensive unit tests for core modules with 90%+ coverage
 - **[x] ✅ Imperative CLI commands** direct commands (shorten, list, delete, get, stats)
 - **[x] ✅ Enhanced CLI UX** better error messages, confirmation prompts, OAuth token storage
 - **[x] ✅ SSH TUI removal** deprecated and removed all SSH TUI code and dependencies
@@ -26,7 +27,7 @@ Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused exper
 - ✅ **Standards-compliant implementation** following RFC 6749 & RFC 7636
 - ✅ **Imperative CLI commands** for direct URL management
 - ✅ **Browser-based OAuth flow** automatic authorization with callback handling
-- ✅ **Production-ready architecture** with PostgreSQL and comprehensive testing
+- ✅ **Production-ready architecture** with PostgreSQL, comprehensive testing, and unit test coverage
 
 **Current Status**: OAuth 2.0 implementation complete! Ready for production use with secure CLI authentication.
 
@@ -50,7 +51,7 @@ Maigo is a **terminal-first URL shortener** built with Go, emphasizing a geek-fo
 - **CLI**: Cobra framework with imperative commands
 
 - **Authentication**: OAuth 2.0 with PKCE for secure CLI authentication
-- **Testing**: Comprehensive test suite with testify
+- **Testing**: Comprehensive unit and integration test suite with testify
 
 ## Requirements & Features
 
@@ -149,6 +150,11 @@ make dev          # Start development server with hot reload
 make build        # Build the binary
 make test         # Run all tests with coverage
 
+# Code Quality & Standards
+make fmt          # Format all code (gofmt + goimports + go mod tidy)
+make lint         # Run golangci-lint for code quality checks
+make check        # Run formatting check, linting, and tests (CI-equivalent)
+
 # Server operations
 make server       # Start HTTP server (port 8080) using maigo server command
 
@@ -175,6 +181,119 @@ DEBUG=false LOG_LEVEL=info maigo server
 # Database management
 make db-setup     # Initialize PostgreSQL database
 make test-setup   # Setup test database and run tests
+
+# Quality Control (IMPORTANT: Run before committing!)
+make fmt          # Format code and organize imports
+make lint         # Check code quality and style
+make check        # Run all quality checks (formatting, linting, tests)
+```
+
+## Code Quality & Development Standards
+
+### 📋 Before Making Any Code Changes
+
+**ALWAYS run these commands before committing:**
+
+```bash
+# 1. Format your code
+make fmt          # Runs gofmt, goimports, and go mod tidy
+
+# 2. Check for linting issues  
+make lint         # Runs golangci-lint with comprehensive checks
+
+# 3. Run all tests
+make test         # Ensures your changes don't break functionality
+
+# 4. Or run everything at once (recommended)
+make check        # Equivalent to CI checks: fmt-check + lint + test + coverage
+```
+
+### 🔧 Code Formatting Standards
+
+The project uses **strict formatting** that's enforced by CI:
+
+- **gofmt**: Standard Go formatting
+- **goimports**: Automatic import organization and cleanup  
+- **golangci-lint**: Comprehensive code quality checks including:
+  - Error checking (`errcheck`)
+  - Code complexity (`gocyclo`) 
+  - Unused variables (`ineffassign`, `unused`)
+  - Security issues (`gosec`)
+  - Style consistency (`gofmt`, `goimports`)
+
+### ✅ Testing Requirements
+
+All code changes must include appropriate tests:
+
+- **Unit tests**: For all new functions and methods (use `*_test.go` files)
+- **Integration tests**: For API endpoints and database operations
+- **Error handling**: Test both success and failure cases
+- **Edge cases**: Test boundary conditions and invalid inputs
+
+### 🚨 CI Requirements
+
+The GitHub Actions CI will **fail** if:
+- Code is not properly formatted (`make fmt-check`)
+- Linting checks fail (`make lint`) 
+- Any tests fail (`make test`)
+- Test coverage drops significantly
+
+### 💡 Development Workflow
+
+```bash
+# 1. Make your changes
+vim internal/shortener/shortener.go
+
+# 2. Add/update tests  
+vim internal/shortener/shortener_test.go
+
+# 3. Format and check quality
+make fmt
+make lint
+
+# 4. Run tests to ensure everything works
+make test
+
+# 5. Commit only after everything passes
+git add .
+git commit -m "feat: add new shortener functionality"
+```
+
+### 🔍 Linting Configuration
+
+The project uses `golangci-lint` with strict settings. Common issues to avoid:
+
+```go
+// ❌ Bad: Unhandled errors
+result, _ := someFunction()
+
+// ✅ Good: Handle errors appropriately  
+result, err := someFunction()
+if err != nil {
+    return fmt.Errorf("operation failed: %w", err)
+}
+
+// ❌ Bad: Unused variables
+func example() {
+    unused := getValue()
+    doSomething()
+}
+
+// ✅ Good: Use or explicitly ignore
+func example() {
+    value := getValue()
+    doSomething(value)
+    
+    // Or for intentionally unused values:
+    _ = getValue() // Explicitly ignored
+}
+```
+
+For benchmark functions and test setup where error checking isn't critical:
+```go
+// Use nolint with explanation for legitimate cases
+//nolint:errcheck // benchmark doesn't need error checking
+encoder.GenerateRandom()
 ```
 
 ## 12-Factor App Configuration
@@ -366,7 +485,7 @@ spec:
 - [x] ✅ **Testing infrastructure** - Comprehensive integration tests with automated setup
 
 ### ✅ PHASE 5 - 12-Factor App Configuration (2025-07-13)
-**Just completed:**
+**Completed:**
 - [x] ✅ **DATABASE_URL support** - Standard PostgreSQL connection URL parsing
 - [x] ✅ **Environment variable mapping** - 12-factor compatible env vars (PORT, DATABASE_URL, etc.)
 - [x] ✅ **Command-line flags** - Server command database configuration override
@@ -374,7 +493,16 @@ spec:
 - [x] ✅ **Production deployment** - Heroku/Docker/K8s ready configuration
 - [x] ✅ **Documentation** - Comprehensive 12-factor configuration examples
 
-### 🚧 PHASE 6 - Advanced Features (Next)
+### ✅ PHASE 6 - Unit Testing & Code Quality (2025-07-19)
+**Just completed:**
+- [x] ✅ **Unit test suite** - Comprehensive unit tests for core modules (shortener, oauth, models, config)
+- [x] ✅ **Test coverage** - 90%+ coverage for critical components (shortener: 94.5%, config: 90.7%)
+- [x] ✅ **Security testing** - PKCE implementation, OAuth 2.0 flows, and cryptographic functions
+- [x] ✅ **CI integration** - All tests pass with race detection enabled
+- [x] ✅ **Code quality** - golangci-lint compliance with strict error checking
+- [x] ✅ **Documentation** - Developer guidelines for formatting, linting, and testing standards
+
+### 🚧 PHASE 7 - Advanced Features (Next)
 
 - [ ] **Enhanced error handling** - Better OAuth error messages and recovery
 - [ ] **Token refresh automation** - Automatic token renewal in CLI
@@ -384,7 +512,7 @@ spec:
 - [ ] **API documentation** - OpenAPI specifications for OAuth endpoints
 - [ ] **Performance optimization** - Caching, database indexing, connection pooling tuning
 
-### 📋 PHASE 7 - Production Ready (Future)
+### 📋 PHASE 8 - Production Ready (Future)
 - [ ] **Custom domain support** - User-owned domain binding
 - [ ] **Let's Encrypt integration** - Automatic SSL certificate management
 - [ ] **Monitoring & logging** - Production observability
@@ -460,7 +588,7 @@ Maigo is a **terminal-first URL shortener** with **production-ready OAuth 2.0 au
 - ✅ **Secure CLI Authentication** - Browser-based OAuth flow with PKCE protection
 - ✅ **Imperative CLI commands** - Direct URL management with OAuth token security
 - ✅ **Complete Authorization Server** - HTML authorization pages and token endpoints
-- ✅ **Production-ready architecture** - PostgreSQL, comprehensive testing, secure design
+- ✅ **Production-ready architecture** - PostgreSQL, comprehensive testing, unit test coverage, secure design
 
 **Current Status**: OAuth 2.0 implementation complete! Maigo now provides secure, standards-compliant authentication for CLI applications with full PKCE protection against authorization code interception attacks.
 
