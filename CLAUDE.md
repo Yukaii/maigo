@@ -24,7 +24,7 @@ Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused exper
 
 - ✅ **Complete OAuth 2.0 authentication** with PKCE for CLI security
 - ✅ **Standards-compliant implementation** following RFC 6749 & RFC 7636
-- ✅ **Imperative CLI commands** for direct URL management  
+- ✅ **Imperative CLI commands** for direct URL management
 - ✅ **Browser-based OAuth flow** automatic authorization with callback handling
 - ✅ **Production-ready architecture** with PostgreSQL and comprehensive testing
 
@@ -149,7 +149,7 @@ make dev          # Start development server with hot reload
 make build        # Build the binary
 make test         # Run all tests with coverage
 
-# Server operations  
+# Server operations
 make server       # Start HTTP server (port 8080) using maigo server command
 
 # 12-Factor App Configuration (Recommended for Production)
@@ -236,7 +236,7 @@ maigo server \
 database:
   # Option 1: DATABASE_URL (recommended)
   url: "postgres://user:pass@host:port/db?sslmode=require"
-  
+
   # Option 2: Individual parameters
   host: localhost
   port: 5432
@@ -351,7 +351,7 @@ spec:
 **✅ Integration & Testing:**
 - [x] ✅ **Database migrations** - Applied OAuth 2.0 schema migrations
 - [x] ✅ **OAuth client setup** - Created CLI client in database with hardcoded credentials
-- [x] ✅ **Database fixtures** - Migration and seeding script for CLI OAuth client  
+- [x] ✅ **Database fixtures** - Migration and seeding script for CLI OAuth client
 - [x] ✅ **Hardcoded client values** - CLI uses consistent client ID and secret values
 - [x] ✅ **Build verification** - All compilation errors resolved
 - [x] ✅ **Flow testing** - Verified OAuth authorization flow end-to-end
@@ -365,7 +365,7 @@ spec:
 - [x] ✅ **CLI application** - Cobra framework with imperative commands
 - [x] ✅ **Testing infrastructure** - Comprehensive integration tests with automated setup
 
-### ✅ PHASE 5 - 12-Factor App Configuration (2025-07-13) 
+### ✅ PHASE 5 - 12-Factor App Configuration (2025-07-13)
 **Just completed:**
 - [x] ✅ **DATABASE_URL support** - Standard PostgreSQL connection URL parsing
 - [x] ✅ **Environment variable mapping** - 12-factor compatible env vars (PORT, DATABASE_URL, etc.)
@@ -384,7 +384,7 @@ spec:
 - [ ] **API documentation** - OpenAPI specifications for OAuth endpoints
 - [ ] **Performance optimization** - Caching, database indexing, connection pooling tuning
 
-### 📋 PHASE 6 - Production Ready (Future)
+### 📋 PHASE 7 - Production Ready (Future)
 - [ ] **Custom domain support** - User-owned domain binding
 - [ ] **Let's Encrypt integration** - Automatic SSL certificate management
 - [ ] **Monitoring & logging** - Production observability
@@ -410,7 +410,7 @@ curl "http://localhost:8080/oauth/authorize?response_type=code&client_id=maigo-c
 # 🌐 Opening browser for OAuth authorization...
 # ⏳ Waiting for authorization...
 
-# Protected API Endpoints - Working ✅  
+# Protected API Endpoints - Working ✅
 curl -X POST http://localhost:8080/api/v1/urls \
   -H "Authorization: Bearer <oauth_access_token>" \
   -H "Content-Type: application/json" \
@@ -433,7 +433,7 @@ curl -X POST http://localhost:8080/oauth/token \
 
 **✅ COMPLETE: Standards-Compliant OAuth 2.0 with PKCE**
 - **Authorization Server**: Full OAuth 2.0 server with HTML authorization pages
-- **PKCE Security**: RFC 7636 compliant for CLI public clients  
+- **PKCE Security**: RFC 7636 compliant for CLI public clients
 - **Token Management**: JWT-based access and refresh tokens
 - **CLI Integration**: Browser-based authorization with local callback handling
 - **Database Schema**: Complete OAuth 2.0 data model with migrations
