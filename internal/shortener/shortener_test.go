@@ -593,6 +593,7 @@ func BenchmarkEncoder_Decode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck // benchmark doesn't need error checking
 		encoder.Decode(encoded)
 	}
 }
@@ -602,6 +603,7 @@ func BenchmarkEncoder_GenerateRandom(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck // benchmark doesn't need error checking
 		encoder.GenerateRandom()
 	}
 }

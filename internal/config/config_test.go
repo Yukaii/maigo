@@ -325,6 +325,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
+		//nolint:errcheck // test setup doesn't need error checking
 		os.Unsetenv(envVar) // Clear to start fresh
 	}
 
@@ -332,17 +333,23 @@ func TestLoadWithEnvVars(t *testing.T) {
 	defer func() {
 		for _, envVar := range envVars {
 			if originalValue, exists := originalVars[envVar]; exists && originalValue != "" {
+				//nolint:errcheck // test cleanup doesn't need error checking
 				os.Setenv(envVar, originalValue)
 			} else {
+				//nolint:errcheck // test cleanup doesn't need error checking
 				os.Unsetenv(envVar)
 			}
 		}
 	}()
 
 	// Set test environment variables
+	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("DATABASE_URL", "postgres://envuser:envpass@envhost:5433/envdb?sslmode=require")
+	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("PORT", "9090")
+	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("JWT_SECRET", "env-jwt-secret")
+	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("DEBUG", "true")
 
 	// Load config - this should pick up environment variables
@@ -367,12 +374,14 @@ func TestLoadDefaults(t *testing.T) {
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
+		//nolint:errcheck // test setup doesn't need error checking
 		os.Unsetenv(envVar)
 	}
 
 	defer func() {
 		for _, envVar := range envVars {
 			if originalValue, exists := originalVars[envVar]; exists {
+				//nolint:errcheck // test cleanup doesn't need error checking
 				os.Setenv(envVar, originalValue)
 			}
 		}

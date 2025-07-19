@@ -69,12 +69,7 @@ func TestURLModel(t *testing.T) {
 
 	t.Run("URL with nil UserID", func(t *testing.T) {
 		url := URL{
-			ID:        1,
-			ShortCode: "abc123",
-			TargetURL: "https://example.com",
-			CreatedAt: time.Now(),
-			Hits:      0,
-			UserID:    nil,
+			UserID: nil,
 		}
 
 		assert.Nil(t, url.UserID)
@@ -195,13 +190,7 @@ func TestAccessTokenModel(t *testing.T) {
 
 	t.Run("AccessToken with nil RefreshToken", func(t *testing.T) {
 		token := AccessToken{
-			Token:        "access-token-123",
 			RefreshToken: nil,
-			ClientID:     "client-id",
-			UserID:       1,
-			Scope:        "read",
-			ExpiresAt:    time.Now().Add(1 * time.Hour),
-			CreatedAt:    time.Now(),
 		}
 
 		assert.Nil(t, token.RefreshToken)

@@ -426,12 +426,14 @@ func TestValidateRedirectURI(t *testing.T) {
 // Benchmark tests
 func BenchmarkGeneratePKCEParams(b *testing.B) {
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck // benchmark doesn't need error checking
 		GeneratePKCEParams()
 	}
 }
 
 func BenchmarkGenerateCodeVerifier(b *testing.B) {
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck // benchmark doesn't need error checking
 		generateCodeVerifier()
 	}
 }
@@ -441,12 +443,14 @@ func BenchmarkCreateCodeChallenge_S256(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck // benchmark doesn't need error checking
 		createCodeChallenge(verifier, PKCEMethodS256)
 	}
 }
 
 func BenchmarkVerifyCodeChallenge_S256(b *testing.B) {
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	//nolint:errcheck // benchmark doesn't need error checking
 	challenge, _ := createCodeChallenge(verifier, PKCEMethodS256)
 	b.ResetTimer()
 
@@ -457,6 +461,7 @@ func BenchmarkVerifyCodeChallenge_S256(b *testing.B) {
 
 func BenchmarkGenerateAuthorizationCode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck // benchmark doesn't need error checking
 		GenerateAuthorizationCode()
 	}
 }
