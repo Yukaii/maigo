@@ -29,6 +29,11 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
 
       - name: Download dependencies
         run: go mod download
