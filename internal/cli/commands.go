@@ -151,12 +151,19 @@ func NewShortenCommand(cfg *config.Config, log *logger.Logger) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to get custom flag: %w", err)
 			}
-			return runCreateShortURL(cfg, log, args[0], custom)
+
+			ttl, err := cmd.Flags().GetInt64("ttl")
+			if err != nil {
+				return fmt.Errorf("failed to get ttl flag: %w", err)
+			}
+
+			return runCreateShortURL(cfg, log, args[0], custom, ttl)
 		},
 	}
 
 	// Add flags
 	cmd.Flags().String("custom", "", "Custom short code")
+	cmd.Flags().Int64("ttl", 0, "Time to live in seconds (0 = no expiration)")
 
 	return cmd
 }
@@ -589,42 +596,44 @@ func runLogout(cfg *config.Config, log *logger.Logger) error {
 func runAuthStatus(cfg *config.Config) error {
 	client := NewAPIClient(cfg)
 
-	tokens, err := client.LoadTokens()
+	status, err := client.GetTokenStatus()
 	if err != nil {
-		fmt.Printf("❌ Error loading tokens: %v\n", err)
+		fmt.Printf("❌ Error checking authentication status: %v\n", err)
 		return nil
 	}
 
-	if tokens == nil {
+	tokenExists, ok := status["token_exists"].(bool)
+	if !ok || !tokenExists {
 		fmt.Println("❌ Not authenticated")
 		fmt.Println("Run 'maigo auth login <username>' to authenticate")
 		return nil
 	}
 
 	fmt.Printf("✅ Authenticated\n")
-	fmt.Printf("Token Type: %s\n", tokens.TokenType)
 
-	if client.IsTokenExpired(tokens) {
+	if expired, ok := status["expired"].(bool); ok && expired {
 		fmt.Printf("❌ Token Status: Expired\n")
-		if tokens.RefreshToken != "" {
-			fmt.Println("🔄 Refresh token available - will be used automatically")
-		} else {
-			fmt.Println("❌ No refresh token available - please login again")
-		}
+		fmt.Println("🔄 Refresh token available - will be used automatically on next API call")
 	} else {
-		expiresIn := tokens.ExpiresAt - time.Now().Unix()
-		fmt.Printf("✅ Token Status: Valid (expires in %d minutes)\n", expiresIn/60)
+		fmt.Printf("✅ Token Status: Valid\n")
+		if timeLeft, ok := status["time_left"].(string); ok && timeLeft != "" {
+			fmt.Printf("⏱️  Time remaining: %s\n", timeLeft)
+		}
+	}
+
+	if expiresAt, ok := status["expires_at"].(string); ok && expiresAt != "" {
+		fmt.Printf("📅 Expires at: %s\n", expiresAt)
 	}
 
 	return nil
 }
 
 // runCreateShortURL creates a new short URL
-func runCreateShortURL(cfg *config.Config, log *logger.Logger, url, custom string) error {
+func runCreateShortURL(cfg *config.Config, log *logger.Logger, url, custom string, ttl int64) error {
 	client := NewAPIClient(cfg)
 
-	log.Info("Creating short URL", "url", url, "custom", custom)
-	response, err := client.CreateShortURL(url, custom)
+	log.Info("Creating short URL", "url", url, "custom", custom, "ttl", ttl)
+	response, err := client.CreateShortURL(url, custom, ttl)
 	if err != nil {
 		log.Error("Failed to create short URL", "url", url, "error", err)
 		return fmt.Errorf("failed to create short URL: %w", err)

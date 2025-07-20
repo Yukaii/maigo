@@ -16,12 +16,33 @@ type User struct {
 
 // URL represents a shortened URL
 type URL struct {
-	ID        int64     `json:"id" db:"id"`
-	ShortCode string    `json:"short_code" db:"short_code" validate:"required,min=1,max=50,alphanum"`
-	TargetURL string    `json:"target_url" db:"target_url" validate:"required,url"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	Hits      int64     `json:"hits" db:"hits"`
-	UserID    *int64    `json:"user_id,omitempty" db:"user_id"`
+	ID        int64      `json:"id" db:"id"`
+	ShortCode string     `json:"short_code" db:"short_code" validate:"required,min=1,max=50,alphanum"`
+	TargetURL string     `json:"target_url" db:"target_url" validate:"required,url"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	Hits      int64      `json:"hits" db:"hits"`
+	UserID    *int64     `json:"user_id,omitempty" db:"user_id"`
+}
+
+// IsExpired checks if the URL has expired
+func (u *URL) IsExpired() bool {
+	if u.ExpiresAt == nil {
+		return false // URLs without expiration never expire
+	}
+	return time.Now().After(*u.ExpiresAt)
+}
+
+// TimeUntilExpiry returns the duration until the URL expires
+func (u *URL) TimeUntilExpiry() *time.Duration {
+	if u.ExpiresAt == nil {
+		return nil // URL doesn't expire
+	}
+	if u.IsExpired() {
+		return nil // Already expired
+	}
+	duration := time.Until(*u.ExpiresAt)
+	return &duration
 }
 
 // OAuthClient represents an OAuth2 client
@@ -78,8 +99,10 @@ type CreateUserRequest struct {
 
 // CreateURLRequest represents a URL creation request
 type CreateURLRequest struct {
-	URL    string `json:"url" validate:"required,url"`
-	Custom string `json:"custom,omitempty" validate:"omitempty,min=3,max=50,alphanum"`
+	URL       string     `json:"url" validate:"required,url"`
+	Custom    string     `json:"custom,omitempty" validate:"omitempty,min=3,max=50,alphanum"`
+	TTL       *int64     `json:"ttl,omitempty" validate:"omitempty,min=60"` // TTL in seconds, minimum 1 minute
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`                      // Alternative to TTL - exact expiration time
 }
 
 // UpdateURLRequest represents a URL update request

@@ -40,12 +40,11 @@ func (h *HealthHandler) ReadinessCheck(c *gin.Context) {
 	// Check database health
 	if err := database.Health(h.db); err != nil {
 		h.logger.Error("Database health check failed", "error", err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":   "error",
-			"service":  "maigo",
-			"database": "unhealthy",
-			"error":    err.Error(),
-		})
+		SendAPIError(c, http.StatusServiceUnavailable, "service_unavailable",
+			"Database health check failed", gin.H{
+				"service":  "maigo",
+				"database": "unhealthy",
+			})
 		return
 	}
 
