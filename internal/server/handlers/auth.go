@@ -62,10 +62,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Error("Invalid login request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Bad Request",
-			"message": err.Error(),
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid login request", err.Error())
 		return
 	}
 
@@ -73,10 +70,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	tokens, err := h.oauthServer.AuthenticateUser(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
 		h.logger.Error("Authentication failed", "username", req.Username, "error", err)
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":   "Unauthorized",
-			"message": "Invalid credentials",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "Invalid credentials", nil)
 		return
 	}
 
@@ -89,10 +83,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Error("Invalid registration request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Bad Request",
-			"message": err.Error(),
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid registration request", err.Error())
 		return
 	}
 
@@ -100,10 +91,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	user, err := h.oauthServer.RegisterUser(c.Request.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		h.logger.Error("User registration failed", "username", req.Username, "email", req.Email, "error", err)
-		c.JSON(http.StatusConflict, gin.H{
-			"error":   "Registration Failed",
-			"message": "Username or email already exists",
-		})
+		SendAPIError(c, http.StatusConflict, "conflict", "Username or email already exists", nil)
 		return
 	}
 
@@ -111,10 +99,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	tokens, err := h.oauthServer.GenerateTokenPair(c.Request.Context(), user)
 	if err != nil {
 		h.logger.Error("Token generation failed after registration", "user_id", user.ID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Internal Server Error",
-			"message": "Failed to generate authentication tokens",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error",
+			"Failed to generate authentication tokens", nil)
 		return
 	}
 
@@ -135,10 +121,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Error("Invalid refresh token request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Bad Request",
-			"message": err.Error(),
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid refresh token request", err.Error())
 		return
 	}
 
@@ -146,10 +129,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	tokens, err := h.oauthServer.RefreshAccessToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
 		h.logger.Error("Token refresh failed", "error", err)
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":   "Unauthorized",
-			"message": "Invalid or expired refresh token",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "Invalid or expired refresh token", nil)
 		return
 	}
 
@@ -163,10 +143,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	userIDInterface, exists := c.Get("user_id")
 	if !exists {
 		h.logger.Error("User ID not found in context during logout")
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":   "Unauthorized",
-			"message": "User not found in context",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "User not found in context", nil)
 		return
 	}
 
@@ -179,10 +156,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		userID = int64(v)
 	default:
 		h.logger.Error("Invalid user ID type in context", "type", fmt.Sprintf("%T", v))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Internal Server Error",
-			"message": "Invalid user ID format",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Invalid user ID format", nil)
 		return
 	}
 
@@ -190,10 +164,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	err := h.oauthServer.RevokeToken(c.Request.Context(), userID)
 	if err != nil {
 		h.logger.Error("Token revocation failed", "user_id", userID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Internal Server Error",
-			"message": "Failed to logout",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to logout", nil)
 		return
 	}
 
@@ -209,10 +180,7 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		h.logger.Error("User ID not found in context")
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":   "Unauthorized",
-			"message": "User not found in context",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "User not found in context", nil)
 		return
 	}
 
@@ -223,10 +191,7 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 	err := h.db.QueryRow(c.Request.Context(), query, userID).Scan(&username, &email, &createdAt)
 	if err != nil {
 		h.logger.Error("Failed to get user profile", "user_id", userID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Internal Server Error",
-			"message": "Failed to retrieve user profile",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to retrieve user profile", nil)
 		return
 	}
 
