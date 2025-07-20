@@ -78,8 +78,20 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 		}
 	}
 
+	// Calculate expiration time from TTL or explicit expiration
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		// Use explicit expiration time
+		expiresAt = req.ExpiresAt
+	} else if req.TTL != nil {
+		// Calculate expiration from TTL (seconds)
+		expiration := time.Now().Add(time.Duration(*req.TTL) * time.Second)
+		expiresAt = &expiration
+	}
+	// If neither TTL nor ExpiresAt is provided, expiresAt remains nil (no expiration)
+
 	// Create URL in database
-	url, err := h.urlRepo.Create(c.Request.Context(), shortCode, sanitizedURL, userID)
+	url, err := h.urlRepo.Create(c.Request.Context(), shortCode, sanitizedURL, userID, expiresAt)
 	if err != nil {
 		h.logger.Error("Failed to create URL", "error", err, "short_code", shortCode)
 		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to create short URL", nil)
@@ -87,7 +99,7 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 	}
 
 	// Build response
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
@@ -98,6 +110,13 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 
 	if url.UserID != nil {
 		response["user_id"] = *url.UserID
+	}
+
+	if url.ExpiresAt != nil {
+		response["expires_at"] = url.ExpiresAt.Format(time.RFC3339)
+		if timeLeft := url.TimeUntilExpiry(); timeLeft != nil {
+			response["expires_in"] = int64(timeLeft.Seconds())
+		}
 	}
 
 	h.logger.Info("Created short URL",
@@ -131,7 +150,7 @@ func (h *URLHandler) GetURL(c *gin.Context) {
 	}
 
 	// Build response
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
@@ -142,6 +161,14 @@ func (h *URLHandler) GetURL(c *gin.Context) {
 
 	if url.UserID != nil {
 		response["user_id"] = *url.UserID
+	}
+
+	if url.ExpiresAt != nil {
+		response["expires_at"] = url.ExpiresAt.Format(time.RFC3339)
+		response["expired"] = url.IsExpired()
+		if timeLeft := url.TimeUntilExpiry(); timeLeft != nil {
+			response["expires_in"] = int64(timeLeft.Seconds())
+		}
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -213,8 +240,15 @@ func (h *URLHandler) DeleteURL(c *gin.Context) {
 	// Get URL to verify ownership
 	url, err := h.urlRepo.GetByShortCode(c.Request.Context(), shortCode)
 	if err != nil {
-		h.logger.Warn("URL not found for deletion", "short_code", shortCode, "error", err)
+		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
 		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
+		return
+	}
+
+	// Check if URL has expired
+	if url.IsExpired() {
+		h.logger.Warn("URL has expired", "short_code", shortCode, "expired_at", url.ExpiresAt)
+		SendAPIError(c, http.StatusGone, "gone", "Short URL has expired", nil)
 		return
 	}
 

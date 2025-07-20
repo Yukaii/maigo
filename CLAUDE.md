@@ -20,6 +20,7 @@
 - **[x] ✅ Imperative CLI commands** direct commands (shorten, list, delete, get, stats)
 - **[x] ✅ Enhanced CLI UX** better error messages, confirmation prompts, OAuth token storage
 - **[x] ✅ SSH TUI removal** deprecated and removed all SSH TUI code and dependencies
+- **[x] ✅ API error handling** centralized, standardized error responses across all endpoints
 
 Maigo is a **terminal-first URL shortener** that emphasizes a geek-focused experience:
 
@@ -494,7 +495,7 @@ spec:
 - [x] ✅ **Documentation** - Comprehensive 12-factor configuration examples
 
 ### ✅ PHASE 6 - Unit Testing & Code Quality (2025-07-19)
-**Just completed:**
+**Completed:**
 - [x] ✅ **Unit test suite** - Comprehensive unit tests for core modules (shortener, oauth, models, config)
 - [x] ✅ **Test coverage** - 90%+ coverage for critical components (shortener: 94.5%, config: 90.7%)
 - [x] ✅ **Security testing** - PKCE implementation, OAuth 2.0 flows, and cryptographic functions
@@ -502,13 +503,22 @@ spec:
 - [x] ✅ **Code quality** - golangci-lint compliance with strict error checking
 - [x] ✅ **Documentation** - Developer guidelines for formatting, linting, and testing standards
 
-### 🚧 PHASE 7 - Advanced Features (Next)
+### ✅ PHASE 6.5 - API Error Handling (2025-07-20)
+**Just completed:**
+- [x] ✅ **Centralized error handling** - `SendAPIError()` function for consistent error responses
+- [x] ✅ **Standardized error format** - JSON error responses with error codes, messages, and details
+- [x] ✅ **Complete handler refactoring** - All 40+ error responses across auth.go, url.go, health.go, oauth.go
+- [x] ✅ **Error code standardization** - `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `internal_server_error`
+- [x] ✅ **Code quality improvements** - Fixed linting issues, replaced `interface{}` with `any`
+- [x] ✅ **Build verification** - All handlers compile and pass linting checks
 
-- [ ] **Enhanced error handling** - Better OAuth error messages and recovery
-- [ ] **Token refresh automation** - Automatic token renewal in CLI
+### 🚧 PHASE 7 - Advanced Features (In Progress)
+
+- [x] ✅ **Centralized error handling** - Standardized API error responses with consistent format
+- [x] ✅ **Token refresh automation** - Automatic token renewal in CLI with OAuth 2.0 endpoint
+- [x] ✅ **URL expiration** - Optional TTL for short URLs with database migration and UI support
+- [ ] **Enhanced OAuth error handling** - Better OAuth error messages and recovery flows
 - [ ] **Multiple OAuth providers** - Support for GitHub, Google OAuth
-- [ ] **Rate limiting** - Per-user API rate limiting with OAuth scopes
-- [ ] **URL expiration** - Optional TTL for short URLs
 - [ ] **API documentation** - OpenAPI specifications for OAuth endpoints
 - [ ] **Performance optimization** - Caching, database indexing, connection pooling tuning
 
