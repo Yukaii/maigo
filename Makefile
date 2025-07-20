@@ -26,7 +26,7 @@ setup:
 	go version
 	go mod download
 	go mod tidy
-	cp .env.example .env
+	@if [ ! -f .env ]; then cp .env.example .env; else echo ".env already exists, skipping copy."; fi
 	@echo "Installing development tools..."
 	go install github.com/air-verse/air@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
