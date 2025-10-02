@@ -1,0 +1,847 @@
+openapi: 3.0.3
+info:
+  title: Maigo URL Shortener API
+  description: |
+    Maigo is a terminal-first URL shortener with OAuth 2.0 authentication.
+
+    ## Authentication
+
+    This API uses OAuth 2.0 with PKCE (Proof Key for Code Exchange) for authentication.
+    The CLI client should use the authorization code flow with PKCE to obtain access tokens.
+
+    ## Base URL
+
+    Development: `http://localhost:8080`
+
+    ## Rate Limiting
+
+    Currently no rate limiting is enforced, but this may change in future versions.
+
+  version: 1.0.0
+  contact:
+    name: Maigo Support
+    url: https://github.com/yukaii/maigo
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.maigo.example.com
+    description: Production server (example)
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: OAuth 2.0
+    description: OAuth 2.0 authorization endpoints
+  - name: Authentication
+    description: User authentication and registration
+  - name: URLs
+    description: URL shortening operations
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns the health status of the server
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: maigo
+                  message:
+                    type: string
+                    example: Server is healthy and running
+
+  /health/ready:
+    get:
+      summary: Readiness check
+      description: Returns the readiness status including database health
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server and database are ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: maigo
+                  database:
+                    type: string
+                    example: healthy
+        '503':
+          description: Service unavailable (database unhealthy)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /oauth/authorize:
+    get:
+      summary: OAuth 2.0 authorization endpoint
+      description: |
+        OAuth 2.0 authorization endpoint that displays an HTML authorization page.
+        This endpoint initiates the OAuth 2.0 authorization code flow with PKCE support.
+      tags:
+        - OAuth 2.0
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [code]
+          description: Must be "code" for authorization code flow
+        - name: client_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The client identifier
+          example: maigo-cli
+        - name: redirect_uri
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+          description: The redirect URI for the callback
+          example: http://localhost:8000/callback
+        - name: scope
+          in: query
+          schema:
+            type: string
+          description: Space-separated list of scopes
+          example: read write
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: CSRF protection state parameter
+        - name: code_challenge
+          in: query
+          required: true
+          schema:
+            type: string
+          description: PKCE code challenge (SHA256 hash of code verifier)
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [S256]
+          description: PKCE code challenge method (must be S256)
+      responses:
+        '200':
+          description: HTML authorization page
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+
+    post:
+      summary: Process authorization request
+      description: Processes the user's authorization decision (approve/deny)
+      tags:
+        - OAuth 2.0
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                client_id:
+                  type: string
+                redirect_uri:
+                  type: string
+                  format: uri
+                scope:
+                  type: string
+                state:
+                  type: string
+                code_challenge:
+                  type: string
+                code_challenge_method:
+                  type: string
+                action:
+                  type: string
+                  enum: [approve, deny]
+              required:
+                - username
+                - password
+                - client_id
+                - redirect_uri
+                - action
+      responses:
+        '302':
+          description: Redirect to callback URI with authorization code or error
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+
+  /oauth/token:
+    post:
+      summary: OAuth 2.0 token endpoint
+      description: |
+        Exchanges authorization code for access tokens or refreshes access tokens.
+        Supports both authorization_code and refresh_token grant types.
+      tags:
+        - OAuth 2.0
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/AuthorizationCodeTokenRequest'
+                - $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Successful token response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '401':
+          description: Invalid client credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+
+  /oauth/revoke:
+    post:
+      summary: Token revocation endpoint
+      description: Revokes an access or refresh token
+      tags:
+        - OAuth 2.0
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: The token to revoke
+              required:
+                - token
+      responses:
+        '200':
+          description: Token successfully revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Token revoked successfully
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user
+      description: Creates a new user account and returns OAuth 2.0 tokens
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User successfully registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Username or email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/auth/login:
+    post:
+      summary: Login user
+      description: Authenticates a user and returns OAuth 2.0 tokens
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/auth/logout:
+    post:
+      summary: Logout user
+      description: Revokes all tokens for the authenticated user
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Logged out successfully
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/auth/profile:
+    get:
+      summary: Get user profile
+      description: Returns the authenticated user's profile information
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/urls:
+    post:
+      summary: Create short URL
+      description: Creates a new short URL with optional custom code and expiration
+      tags:
+        - URLs
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateURLRequest'
+      responses:
+        '201':
+          description: Short URL created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/URL'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Custom short code already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: List user URLs
+      description: Lists all URLs created by the authenticated user with pagination
+      tags:
+        - URLs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Number of items per page
+      responses:
+        '200':
+          description: List of URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/URLListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/urls/{id}:
+    get:
+      summary: Get URL details
+      description: Returns details of a specific URL by ID
+      tags:
+        - URLs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: URL ID
+      responses:
+        '200':
+          description: URL details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/URL'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - URL belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: URL not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete URL
+      description: Deletes a short URL by ID
+      tags:
+        - URLs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: URL ID
+      responses:
+        '200':
+          description: URL deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: URL deleted successfully
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - URL belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: URL not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /{short_code}:
+    get:
+      summary: Redirect to target URL
+      description: |
+        Redirects to the target URL associated with the short code.
+        Increments the hit counter for analytics.
+        Returns 410 Gone if the URL has expired.
+      tags:
+        - URLs
+      parameters:
+        - name: short_code
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The short code to redirect
+          example: abc123
+      responses:
+        '302':
+          description: Redirect to target URL
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+              description: The target URL to redirect to
+        '404':
+          description: Short code not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: URL has expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 JWT access token
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: bad_request
+        message:
+          type: string
+          description: Human-readable error message
+          example: Invalid request parameters
+        details:
+          description: Additional error details
+          oneOf:
+            - type: string
+            - type: object
+            - type: 'null'
+
+    OAuthError:
+      type: object
+      properties:
+        error:
+          type: string
+          description: OAuth 2.0 error code
+          enum:
+            - invalid_request
+            - invalid_client
+            - invalid_grant
+            - unauthorized_client
+            - unsupported_grant_type
+            - invalid_scope
+            - access_denied
+            - server_error
+            - temporarily_unavailable
+        error_description:
+          type: string
+          description: Human-readable error description
+        error_uri:
+          type: string
+          format: uri
+          description: URI to error documentation
+
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - email
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          example: johndoe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        password:
+          type: string
+          minLength: 8
+          format: password
+          example: securePassword123
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          example: johndoe
+        password:
+          type: string
+          format: password
+          example: securePassword123
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refresh_token:
+          type: string
+          description: JWT refresh token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Token expiration in seconds
+          example: 3600
+
+    AuthorizationCodeTokenRequest:
+      type: object
+      required:
+        - grant_type
+        - code
+        - redirect_uri
+        - client_id
+        - code_verifier
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code]
+        code:
+          type: string
+          description: Authorization code from /oauth/authorize
+        redirect_uri:
+          type: string
+          format: uri
+          description: Must match the redirect_uri from authorization request
+        client_id:
+          type: string
+          description: Client identifier
+        code_verifier:
+          type: string
+          description: PKCE code verifier (original random string)
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - grant_type
+        - refresh_token
+        - client_id
+      properties:
+        grant_type:
+          type: string
+          enum: [refresh_token]
+        refresh_token:
+          type: string
+          description: The refresh token
+        client_id:
+          type: string
+          description: Client identifier
+
+    UserProfile:
+      type: object
+      properties:
+        username:
+          type: string
+          example: johndoe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-01-01T12:00:00Z'
+
+    CreateURLRequest:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The target URL to shorten
+          example: https://example.com/very/long/url
+        custom:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: '^[a-zA-Z0-9]+$'
+          description: Custom short code (alphanumeric only)
+          example: mylink
+        ttl:
+          type: integer
+          minimum: 60
+          description: Time to live in seconds (minimum 60 seconds)
+          example: 86400
+        expires_at:
+          type: string
+          format: date-time
+          description: Exact expiration timestamp (alternative to ttl)
+          example: '2025-12-31T23:59:59Z'
+
+    URL:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        short_code:
+          type: string
+          example: abc123
+        target_url:
+          type: string
+          format: uri
+          example: https://example.com/very/long/url
+        created_at:
+          type: string
+          format: date-time
+          example: '2025-01-01T12:00:00Z'
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Expiration timestamp (null if never expires)
+          example: '2025-12-31T23:59:59Z'
+        hits:
+          type: integer
+          description: Number of times this URL has been accessed
+          example: 42
+        user_id:
+          type: integer
+          nullable: true
+          example: 1
+
+    URLListResponse:
+      type: object
+      properties:
+        urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/URL'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 20
+            total:
+              type: integer
+              example: 100
+            total_pages:
+              type: integer
+              example: 5

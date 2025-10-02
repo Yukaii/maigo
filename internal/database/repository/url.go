@@ -23,21 +23,29 @@ func NewURLRepository(db *pgxpool.Pool) *URLRepository {
 }
 
 // Create creates a new short URL
-func (r *URLRepository) Create(ctx context.Context, shortCode, targetURL string, userID *int64) (*models.URL, error) {
+func (r *URLRepository) Create(
+	ctx context.Context,
+	shortCode, targetURL string,
+	userID *int64,
+	expiresAt *time.Time,
+) (*models.URL, error) {
 	url := &models.URL{
 		ShortCode: shortCode,
 		TargetURL: targetURL,
 		UserID:    userID,
+		ExpiresAt: expiresAt,
 		Hits:      0,
 		CreatedAt: time.Now(),
 	}
 
 	query := `
-		INSERT INTO urls (short_code, target_url, user_id, hits, created_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO urls (short_code, target_url, user_id, hits, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`
 
-	err := r.db.QueryRow(ctx, query, url.ShortCode, url.TargetURL, url.UserID, url.Hits, url.CreatedAt).Scan(&url.ID)
+	err := r.db.QueryRow(ctx, query,
+		url.ShortCode, url.TargetURL, url.UserID, url.Hits, url.CreatedAt, url.ExpiresAt,
+	).Scan(&url.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create URL: %w", err)
 	}
@@ -48,12 +56,13 @@ func (r *URLRepository) Create(ctx context.Context, shortCode, targetURL string,
 // getByField retrieves a URL by a given field and value
 func (r *URLRepository) getByField(ctx context.Context, field string, value any) (*models.URL, error) {
 	url := &models.URL{}
-	query := `SELECT id, short_code, target_url, created_at, hits, user_id FROM urls WHERE ` + field + ` = $1`
+	query := `SELECT id, short_code, target_url, created_at, expires_at, hits, user_id FROM urls WHERE ` + field + ` = $1`
 	err := r.db.QueryRow(ctx, query, value).Scan(
 		&url.ID,
 		&url.ShortCode,
 		&url.TargetURL,
 		&url.CreatedAt,
+		&url.ExpiresAt,
 		&url.Hits,
 		&url.UserID,
 	)
@@ -94,7 +103,7 @@ func (r *URLRepository) GetByUserID(
 	// Get URLs with pagination
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT id, short_code, target_url, created_at, hits, user_id
+		SELECT id, short_code, target_url, created_at, expires_at, hits, user_id
 		FROM urls
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -114,6 +123,7 @@ func (r *URLRepository) GetByUserID(
 			&url.ShortCode,
 			&url.TargetURL,
 			&url.CreatedAt,
+			&url.ExpiresAt,
 			&url.Hits,
 			&url.UserID,
 		)
@@ -232,7 +242,7 @@ func (r *URLRepository) List(ctx context.Context, page, pageSize int) ([]models.
 	// Get URLs with pagination
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT id, short_code, target_url, created_at, hits, user_id
+		SELECT id, short_code, target_url, created_at, expires_at, hits, user_id
 		FROM urls
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2`
@@ -251,6 +261,7 @@ func (r *URLRepository) List(ctx context.Context, page, pageSize int) ([]models.
 			&url.ShortCode,
 			&url.TargetURL,
 			&url.CreatedAt,
+			&url.ExpiresAt,
 			&url.Hits,
 			&url.UserID,
 		)
@@ -283,7 +294,7 @@ func (r *URLRepository) ShortCodeExists(ctx context.Context, shortCode string) (
 // GetTopURLs retrieves most popular URLs
 func (r *URLRepository) GetTopURLs(ctx context.Context, limit int) ([]models.URL, error) {
 	query := `
-		SELECT id, short_code, target_url, created_at, hits, user_id
+		SELECT id, short_code, target_url, created_at, expires_at, hits, user_id
 		FROM urls
 		ORDER BY hits DESC
 		LIMIT $1`
@@ -302,6 +313,7 @@ func (r *URLRepository) GetTopURLs(ctx context.Context, limit int) ([]models.URL
 			&url.ShortCode,
 			&url.TargetURL,
 			&url.CreatedAt,
+			&url.ExpiresAt,
 			&url.Hits,
 			&url.UserID,
 		)

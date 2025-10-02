@@ -124,10 +124,7 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 	var req oauth.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
 		h.logger.Error("Invalid token request", "error", err)
-		c.JSON(http.StatusBadRequest, oauth.TokenError{
-			ErrorCode:        oauth.ErrorInvalidRequest,
-			ErrorDescription: "Invalid request parameters",
-		})
+		SendAPIError(c, http.StatusBadRequest, "invalid_request", "Invalid request parameters", nil)
 		return
 	}
 
@@ -150,12 +147,9 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 			if tokenErr.ErrorCode == oauth.ErrorInvalidClient {
 				status = http.StatusUnauthorized
 			}
-			c.JSON(status, tokenErr)
+			SendAPIError(c, status, tokenErr.ErrorCode, tokenErr.ErrorDescription, nil)
 		} else {
-			c.JSON(http.StatusInternalServerError, oauth.TokenError{
-				ErrorCode:        oauth.ErrorServerError,
-				ErrorDescription: "Internal server error",
-			})
+			SendAPIError(c, http.StatusInternalServerError, "server_error", "Internal server error", nil)
 		}
 		return
 	}
@@ -169,10 +163,7 @@ func (h *OAuthHandler) TokenEndpoint(c *gin.Context) {
 func (h *OAuthHandler) RevokeEndpoint(c *gin.Context) {
 	token := c.PostForm("token")
 	if token == "" {
-		c.JSON(http.StatusBadRequest, oauth.TokenError{
-			ErrorCode:        oauth.ErrorInvalidRequest,
-			ErrorDescription: "Missing token parameter",
-		})
+		SendAPIError(c, http.StatusBadRequest, "invalid_request", "Missing token parameter", nil)
 		return
 	}
 
@@ -265,7 +256,7 @@ func (h *OAuthHandler) renderAuthorizationPage(c *gin.Context, req *oauth.Author
 
 // extractUserIDFromToken extracts user ID from an access token
 func (h *OAuthHandler) extractUserIDFromToken(tokenString string) (int64, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -393,10 +384,7 @@ func (h *OAuthHandler) redirectWithCode(c *gin.Context, redirectURI, code, state
 func (h *OAuthHandler) redirectWithError(c *gin.Context, redirectURI, state, errorCode, errorDescription string) {
 	if redirectURI == "" {
 		// Can't redirect, show error page
-		c.JSON(http.StatusBadRequest, oauth.TokenError{
-			ErrorCode:        errorCode,
-			ErrorDescription: errorDescription,
-		})
+		SendAPIError(c, http.StatusBadRequest, errorCode, errorDescription, nil)
 		return
 	}
 

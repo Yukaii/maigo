@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/yukaii/maigo/internal/config"
@@ -114,7 +115,7 @@ func (c *APIClient) IsTokenExpired(tokens *TokenData) bool {
 	return time.Now().Unix() > (tokens.ExpiresAt - 300)
 }
 
-// RefreshTokens refreshes the access token using the refresh token
+// RefreshTokens refreshes the access token using the refresh token via OAuth 2.0 endpoint
 func (c *APIClient) RefreshTokens() (*TokenData, error) {
 	tokens, err := c.LoadTokens()
 	if err != nil {
@@ -124,22 +125,79 @@ func (c *APIClient) RefreshTokens() (*TokenData, error) {
 		return nil, fmt.Errorf("no refresh token available")
 	}
 
-	reqBody := map[string]string{
-		"refresh_token": tokens.RefreshToken,
-	}
-
-	var response models.TokenResponse
-	err = c.makeRequest("POST", "/api/v1/auth/token", reqBody, &response, "")
+	// Use OAuth 2.0 token endpoint for refresh
+	refreshResp, err := c.refreshTokensOAuth(tokens.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
 
 	// Save new tokens
-	if err := c.SaveTokens(&response); err != nil {
+	if err := c.SaveTokens(refreshResp); err != nil {
 		return nil, fmt.Errorf("failed to save refreshed tokens: %w", err)
 	}
 
 	return c.LoadTokens()
+}
+
+// refreshTokensOAuth performs OAuth 2.0 refresh token flow
+func (c *APIClient) refreshTokensOAuth(refreshToken string) (*models.TokenResponse, error) {
+	tokenURL := fmt.Sprintf("%s/oauth/token", c.BaseURL)
+
+	// Prepare form data for OAuth 2.0 token endpoint
+	reqBody := map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": refreshToken,
+		"client_id":     CLIClientID,
+	}
+
+	// Convert to form-encoded data
+	formData := make([]string, 0, len(reqBody))
+	for key, value := range reqBody {
+		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
+	}
+	formDataString := strings.Join(formData, "&")
+
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(formDataString))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh tokens: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Printf("Warning: failed to close response body: %v\n", closeErr)
+		}
+	}()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("❌ Failed to read refresh response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// Try to parse OAuth error response
+		var oauthErr struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		if json.Unmarshal(respBody, &oauthErr) == nil && oauthErr.Error != "" {
+			return nil, buildRefreshTokenError(oauthErr.Error, oauthErr.ErrorDescription)
+		}
+		return nil, fmt.Errorf("❌ Refresh token request failed with HTTP status %d", resp.StatusCode)
+	}
+
+	var tokenResp models.TokenResponse
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return nil, fmt.Errorf("failed to decode refresh token response: %w", err)
+	}
+
+	return &tokenResp, nil
 }
 
 // GetValidToken returns a valid access token, refreshing if necessary
@@ -154,11 +212,16 @@ func (c *APIClient) GetValidToken() (string, error) {
 
 	// Check if token is expired
 	if c.IsTokenExpired(tokens) {
+		fmt.Printf("🔄 Access token expired, refreshing automatically...\n")
+
 		// Try to refresh
 		refreshedTokens, err := c.RefreshTokens()
 		if err != nil {
+			fmt.Printf("❌ Token refresh failed. Please run 'maigo auth login' to re-authenticate.\n")
 			return "", fmt.Errorf("token expired and refresh failed: %w", err)
 		}
+
+		fmt.Printf("✅ Token refreshed successfully!\n")
 		tokens = refreshedTokens
 	}
 
@@ -208,17 +271,20 @@ func (c *APIClient) Register(username, email, password string) (map[string]inter
 }
 
 // CreateShortURL creates a new short URL
-func (c *APIClient) CreateShortURL(url, custom string) (map[string]interface{}, error) {
+func (c *APIClient) CreateShortURL(url, custom string, ttl int64) (map[string]interface{}, error) {
 	token, err := c.GetValidToken()
 	if err != nil {
 		return nil, err
 	}
 
-	reqBody := map[string]string{
+	reqBody := map[string]interface{}{
 		"url": url,
 	}
 	if custom != "" {
 		reqBody["custom"] = custom
+	}
+	if ttl > 0 {
+		reqBody["ttl"] = ttl
 	}
 
 	var response map[string]interface{}
@@ -362,4 +428,74 @@ func (c *APIClient) makeRequest(method, path string, body, response interface{},
 	}
 
 	return nil
+}
+
+// OAuth error codes
+const (
+	oauthErrInvalidGrant   = "invalid_grant"
+	oauthErrInvalidRequest = "invalid_request"
+	oauthErrInvalidClient  = "invalid_client"
+	oauthErrUnauthorized   = "unauthorized_client"
+)
+
+// buildRefreshTokenError creates a user-friendly error message for refresh token errors
+func buildRefreshTokenError(errorCode, errorDescription string) error {
+	var userMessage string
+
+	switch errorCode {
+	case oauthErrInvalidGrant:
+		userMessage = "❌ Refresh token expired or invalid\n   " +
+			"Please run 'maigo auth login' to re-authenticate"
+	case oauthErrInvalidRequest:
+		userMessage = "❌ Invalid refresh token request\n   " +
+			"Please run 'maigo auth login' to re-authenticate"
+	case oauthErrInvalidClient:
+		userMessage = "❌ Invalid client credentials\n   Please update your Maigo CLI"
+	case oauthErrUnauthorized:
+		userMessage = "❌ Client not authorized for token refresh\n   " +
+			"Please run 'maigo auth login' to re-authenticate"
+	default:
+		userMessage = fmt.Sprintf("❌ Token refresh failed - %s\n   "+
+			"Please run 'maigo auth login' to re-authenticate", errorCode)
+	}
+
+	if errorDescription != "" {
+		return fmt.Errorf("%s\n   Details: %s", userMessage, errorDescription)
+	}
+
+	return fmt.Errorf("%s", userMessage)
+}
+
+// GetTokenStatus returns the current authentication status
+func (c *APIClient) GetTokenStatus() (map[string]interface{}, error) {
+	tokens, err := c.LoadTokens()
+	if err != nil {
+		return nil, err
+	}
+
+	status := map[string]interface{}{
+		"authenticated": false,
+		"token_exists":  false,
+		"expired":       false,
+		"expires_at":    nil,
+		"time_left":     nil,
+	}
+
+	if tokens == nil {
+		return status, nil
+	}
+
+	status["token_exists"] = true
+	status["authenticated"] = true
+	status["expires_at"] = time.Unix(tokens.ExpiresAt, 0).Format(time.RFC3339)
+
+	if c.IsTokenExpired(tokens) {
+		status["expired"] = true
+		status["authenticated"] = false
+	} else {
+		timeLeft := time.Until(time.Unix(tokens.ExpiresAt, 0))
+		status["time_left"] = timeLeft.String()
+	}
+
+	return status, nil
 }

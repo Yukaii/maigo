@@ -51,20 +51,14 @@ func NewURLHandler(db *pgxpool.Pool, cfg *config.Config, log *logger.Logger) *UR
 func (h *URLHandler) CreateShortURL(c *gin.Context) {
 	var req models.CreateURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: err.Error(),
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid create URL request", err.Error())
 		return
 	}
 
 	// Sanitize the URL
 	sanitizedURL, err := shortener.SanitizeURL(req.URL)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Invalid URL: " + err.Error(),
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid URL: "+err.Error(), nil)
 		return
 	}
 
@@ -72,10 +66,7 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 	shortCode, err := h.shortener.GenerateShortCode(req.Custom)
 	if err != nil {
 		h.logger.Error("Failed to generate short code", "error", err, "url", sanitizedURL)
-		c.JSON(http.StatusConflict, models.ErrorResponse{
-			Error:   "Conflict",
-			Message: err.Error(),
-		})
+		SendAPIError(c, http.StatusConflict, "conflict", err.Error(), nil)
 		return
 	}
 
@@ -87,19 +78,28 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 		}
 	}
 
+	// Calculate expiration time from TTL or explicit expiration
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		// Use explicit expiration time
+		expiresAt = req.ExpiresAt
+	} else if req.TTL != nil {
+		// Calculate expiration from TTL (seconds)
+		expiration := time.Now().Add(time.Duration(*req.TTL) * time.Second)
+		expiresAt = &expiration
+	}
+	// If neither TTL nor ExpiresAt is provided, expiresAt remains nil (no expiration)
+
 	// Create URL in database
-	url, err := h.urlRepo.Create(c.Request.Context(), shortCode, sanitizedURL, userID)
+	url, err := h.urlRepo.Create(c.Request.Context(), shortCode, sanitizedURL, userID, expiresAt)
 	if err != nil {
 		h.logger.Error("Failed to create URL", "error", err, "short_code", shortCode)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: "Failed to create short URL",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to create short URL", nil)
 		return
 	}
 
 	// Build response
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
@@ -110,6 +110,13 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 
 	if url.UserID != nil {
 		response["user_id"] = *url.UserID
+	}
+
+	if url.ExpiresAt != nil {
+		response["expires_at"] = url.ExpiresAt.Format(time.RFC3339)
+		if timeLeft := url.TimeUntilExpiry(); timeLeft != nil {
+			response["expires_in"] = int64(timeLeft.Seconds())
+		}
 	}
 
 	h.logger.Info("Created short URL",
@@ -124,19 +131,13 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 func (h *URLHandler) GetURL(c *gin.Context) {
 	shortCode := c.Param("code")
 	if shortCode == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Short code is required",
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Short code is required", nil)
 		return
 	}
 
 	// Validate short code
 	if err := h.shortener.ValidateShortCode(shortCode); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Invalid short code format",
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid short code format", nil)
 		return
 	}
 
@@ -144,15 +145,12 @@ func (h *URLHandler) GetURL(c *gin.Context) {
 	url, err := h.urlRepo.GetByShortCode(c.Request.Context(), shortCode)
 	if err != nil {
 		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "Not Found",
-			Message: "Short URL not found",
-		})
+		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
 		return
 	}
 
 	// Build response
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
@@ -165,6 +163,14 @@ func (h *URLHandler) GetURL(c *gin.Context) {
 		response["user_id"] = *url.UserID
 	}
 
+	if url.ExpiresAt != nil {
+		response["expires_at"] = url.ExpiresAt.Format(time.RFC3339)
+		response["expired"] = url.IsExpired()
+		if timeLeft := url.TimeUntilExpiry(); timeLeft != nil {
+			response["expires_in"] = int64(timeLeft.Seconds())
+		}
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -172,30 +178,21 @@ func (h *URLHandler) GetURL(c *gin.Context) {
 func (h *URLHandler) RedirectShortURL(c *gin.Context) {
 	shortCode := c.Param("code")
 	if shortCode == "" {
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "Not Found",
-			Message: "Short code not found",
-		})
+		SendAPIError(c, http.StatusNotFound, "not_found", "Short code not found", nil)
 		return
 	}
 
 	// Validate short code
 	if err := h.shortener.ValidateShortCode(shortCode); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Invalid short code format",
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid short code format", nil)
 		return
 	}
 
 	// Get URL from database
 	url, err := h.urlRepo.GetByShortCode(c.Request.Context(), shortCode)
 	if err != nil {
-		h.logger.Warn("URL not found for redirect", "short_code", shortCode, "error", err)
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "Not Found",
-			Message: "Short URL not found",
-		})
+		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
+		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
 		return
 	}
 
@@ -223,59 +220,48 @@ func (h *URLHandler) RedirectShortURL(c *gin.Context) {
 func (h *URLHandler) DeleteURL(c *gin.Context) {
 	shortCode := c.Param("code")
 	if shortCode == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Short code is required",
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Short code is required", nil)
 		return
 	}
 
 	// Get user ID from context
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Unauthorized",
-			Message: "User authentication required",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "User authentication required", nil)
 		return
 	}
 
 	uid, ok := userID.(int64)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Unauthorized",
-			Message: "Invalid user ID",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "Invalid user ID", nil)
 		return
 	}
 
 	// Get URL to verify ownership
 	url, err := h.urlRepo.GetByShortCode(c.Request.Context(), shortCode)
 	if err != nil {
-		h.logger.Warn("URL not found for deletion", "short_code", shortCode, "error", err)
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "Not Found",
-			Message: "Short URL not found",
-		})
+		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
+		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
+		return
+	}
+
+	// Check if URL has expired
+	if url.IsExpired() {
+		h.logger.Warn("URL has expired", "short_code", shortCode, "expired_at", url.ExpiresAt)
+		SendAPIError(c, http.StatusGone, "gone", "Short URL has expired", nil)
 		return
 	}
 
 	// Check ownership
 	if url.UserID == nil || *url.UserID != uid {
-		c.JSON(http.StatusForbidden, models.ErrorResponse{
-			Error:   "Forbidden",
-			Message: "You don't have permission to delete this URL",
-		})
+		SendAPIError(c, http.StatusForbidden, "forbidden", "You don't have permission to delete this URL", nil)
 		return
 	}
 
 	// Delete URL
 	if err := h.urlRepo.DeleteByUserAndID(c.Request.Context(), uid, url.ID); err != nil {
 		h.logger.Error("Failed to delete URL", "short_code", shortCode, "error", err)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: "Failed to delete URL",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to delete URL", nil)
 		return
 	}
 
@@ -291,19 +277,13 @@ func (h *URLHandler) GetUserURLs(c *gin.Context) {
 	// Get user ID from context
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Unauthorized",
-			Message: "User authentication required",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "User authentication required", nil)
 		return
 	}
 
 	uid, ok := userID.(int64)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Unauthorized",
-			Message: "Invalid user ID",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "Invalid user ID", nil)
 		return
 	}
 
@@ -326,10 +306,7 @@ func (h *URLHandler) GetUserURLs(c *gin.Context) {
 	urls, total, err := h.urlRepo.GetByUserID(c.Request.Context(), uid, page, pageSize)
 	if err != nil {
 		h.logger.Error("Failed to get user URLs", "user_id", uid, "error", err)
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Error:   "Internal Server Error",
-			Message: "Failed to retrieve URLs",
-		})
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to retrieve URLs", nil)
 		return
 	}
 
@@ -369,38 +346,26 @@ func (h *URLHandler) GetUserURLs(c *gin.Context) {
 func (h *URLHandler) GetURLStats(c *gin.Context) {
 	shortCode := c.Param("code")
 	if shortCode == "" {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Short code is required",
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Short code is required", nil)
 		return
 	}
 
 	// Get user ID from context
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Unauthorized",
-			Message: "User authentication required",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "User authentication required", nil)
 		return
 	}
 
 	uid, ok := userID.(int64)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Error:   "Unauthorized",
-			Message: "Invalid user ID",
-		})
+		SendAPIError(c, http.StatusUnauthorized, "unauthorized", "Invalid user ID", nil)
 		return
 	}
 
 	// Validate short code
 	if err := h.shortener.ValidateShortCode(shortCode); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Bad Request",
-			Message: "Invalid short code format",
-		})
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Invalid short code format", nil)
 		return
 	}
 
@@ -408,19 +373,14 @@ func (h *URLHandler) GetURLStats(c *gin.Context) {
 	url, err := h.urlRepo.GetByShortCode(c.Request.Context(), shortCode)
 	if err != nil {
 		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
-			Error:   "Not Found",
-			Message: "Short URL not found",
-		})
+		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
 		return
 	}
 
 	// Check ownership
 	if url.UserID == nil || *url.UserID != uid {
-		c.JSON(http.StatusForbidden, models.ErrorResponse{
-			Error:   "Forbidden",
-			Message: "You don't have permission to view statistics for this URL",
-		})
+		SendAPIError(c, http.StatusForbidden, "forbidden",
+			"You don't have permission to view statistics for this URL", nil)
 		return
 	}
 
