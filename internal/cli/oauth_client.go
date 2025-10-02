@@ -120,7 +120,7 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 	select {
 	case result := <-callbackChan:
 		if result.Error != "" {
-			return nil, fmt.Errorf("authorization failed: %s - %s", result.Error, result.ErrorDescription)
+			return nil, c.buildOAuthError(result.Error, result.ErrorDescription)
 		}
 
 		c.logger.Info("Authorization code received", "code_length", len(result.Code))
@@ -132,15 +132,15 @@ func (c *OAuthClient) PerformOAuthFlow(ctx context.Context) (*models.TokenRespon
 		}
 
 		c.logger.Info("Tokens obtained successfully")
-		fmt.Printf("[SUCCESS] OAuth authorization successful!\n")
+		fmt.Printf("✅ OAuth authorization successful!\n")
 
 		return tokens, nil
 
 	case <-ctx.Done():
-		return nil, fmt.Errorf("authorization timeout or canceled")
+		return nil, fmt.Errorf("⏱️  authorization timeout or canceled")
 
 	case <-time.After(5 * time.Minute):
-		return nil, fmt.Errorf("authorization timeout after 5 minutes")
+		return nil, fmt.Errorf("⏱️  authorization timeout after 5 minutes - please try again")
 	}
 }
 
@@ -537,7 +537,7 @@ func (c *OAuthClient) exchangeCodeForTokens(code, codeVerifier string) (*models.
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to exchange code for tokens: %w", err)
+		return nil, fmt.Errorf("❌ Network error - failed to exchange code for tokens: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -546,12 +546,22 @@ func (c *OAuthClient) exchangeCodeForTokens(code, codeVerifier string) (*models.
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token exchange failed with status %d", resp.StatusCode)
+		// Try to parse OAuth error response
+		var oauthErr struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+
+		if err := c.decodeJSONResponse(resp, &oauthErr); err == nil && oauthErr.Error != "" {
+			return nil, c.buildTokenExchangeError(oauthErr.Error, oauthErr.ErrorDescription)
+		}
+
+		return nil, fmt.Errorf("❌ Token exchange failed with HTTP status %d", resp.StatusCode)
 	}
 
 	var tokens models.TokenResponse
 	if err := c.decodeJSONResponse(resp, &tokens); err != nil {
-		return nil, fmt.Errorf("failed to decode token response: %w", err)
+		return nil, fmt.Errorf("❌ Failed to parse token response: %w", err)
 	}
 
 	return &tokens, nil
@@ -580,4 +590,65 @@ func (c *OAuthClient) openBrowser(url string) error {
 // decodeJSONResponse decodes JSON response into the given interface
 func (c *OAuthClient) decodeJSONResponse(resp *http.Response, v interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+// buildOAuthError creates a user-friendly error message from OAuth error codes
+func (c *OAuthClient) buildOAuthError(errorCode, errorDescription string) error {
+	var userMessage string
+
+	switch errorCode {
+	case "access_denied":
+		userMessage = "❌ Authorization denied - You rejected the authorization request"
+	case "invalid_request":
+		userMessage = "❌ Invalid authorization request - Please try again"
+	case "unauthorized_client":
+		userMessage = "❌ Unauthorized client - The CLI client is not authorized"
+	case "unsupported_response_type":
+		userMessage = "❌ Unsupported response type - Please update your Maigo CLI"
+	case "invalid_scope":
+		userMessage = "❌ Invalid scope requested - Please try again"
+	case "server_error":
+		userMessage = "❌ Server error - The authorization server encountered an error"
+	case "temporarily_unavailable":
+		userMessage = "❌ Server temporarily unavailable - Please try again later"
+	case "invalid_state":
+		userMessage = "❌ Security error - State parameter mismatch (possible CSRF attack)"
+	default:
+		userMessage = fmt.Sprintf("❌ Authorization failed - %s", errorCode)
+	}
+
+	if errorDescription != "" {
+		return fmt.Errorf("%s\n   Details: %s", userMessage, errorDescription)
+	}
+
+	return fmt.Errorf("%s", userMessage)
+}
+
+// buildTokenExchangeError creates a user-friendly error message for token exchange errors
+func (c *OAuthClient) buildTokenExchangeError(errorCode, errorDescription string) error {
+	var userMessage string
+
+	switch errorCode {
+	case "invalid_request":
+		userMessage = "❌ Invalid token request - Please try logging in again"
+	case "invalid_client":
+		userMessage = "❌ Invalid client credentials - Please update your Maigo CLI"
+	case "invalid_grant":
+		userMessage = "❌ Invalid authorization code - " +
+			"The code may have expired or been used already\n   Please try logging in again"
+	case "unauthorized_client":
+		userMessage = "❌ Unauthorized client - This client is not allowed to use this grant type"
+	case "unsupported_grant_type":
+		userMessage = "❌ Unsupported grant type - Please update your Maigo CLI"
+	case "invalid_scope":
+		userMessage = "❌ Invalid scope - The requested scope is invalid or exceeds granted scope"
+	default:
+		userMessage = fmt.Sprintf("❌ Token exchange failed - %s", errorCode)
+	}
+
+	if errorDescription != "" {
+		return fmt.Errorf("%s\n   Details: %s", userMessage, errorDescription)
+	}
+
+	return fmt.Errorf("%s", userMessage)
 }

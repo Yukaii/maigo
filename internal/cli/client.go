@@ -177,7 +177,7 @@ func (c *APIClient) refreshTokensOAuth(refreshToken string) (*models.TokenRespon
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read refresh response: %w", err)
+		return nil, fmt.Errorf("❌ Failed to read refresh response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -187,9 +187,9 @@ func (c *APIClient) refreshTokensOAuth(refreshToken string) (*models.TokenRespon
 			ErrorDescription string `json:"error_description"`
 		}
 		if json.Unmarshal(respBody, &oauthErr) == nil && oauthErr.Error != "" {
-			return nil, fmt.Errorf("OAuth refresh failed: %s - %s", oauthErr.Error, oauthErr.ErrorDescription)
+			return nil, buildRefreshTokenError(oauthErr.Error, oauthErr.ErrorDescription)
 		}
-		return nil, fmt.Errorf("refresh token request failed with status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("❌ Refresh token request failed with HTTP status %d", resp.StatusCode)
 	}
 
 	var tokenResp models.TokenResponse
@@ -428,6 +428,42 @@ func (c *APIClient) makeRequest(method, path string, body, response interface{},
 	}
 
 	return nil
+}
+
+// OAuth error codes
+const (
+	oauthErrInvalidGrant   = "invalid_grant"
+	oauthErrInvalidRequest = "invalid_request"
+	oauthErrInvalidClient  = "invalid_client"
+	oauthErrUnauthorized   = "unauthorized_client"
+)
+
+// buildRefreshTokenError creates a user-friendly error message for refresh token errors
+func buildRefreshTokenError(errorCode, errorDescription string) error {
+	var userMessage string
+
+	switch errorCode {
+	case oauthErrInvalidGrant:
+		userMessage = "❌ Refresh token expired or invalid\n   " +
+			"Please run 'maigo auth login' to re-authenticate"
+	case oauthErrInvalidRequest:
+		userMessage = "❌ Invalid refresh token request\n   " +
+			"Please run 'maigo auth login' to re-authenticate"
+	case oauthErrInvalidClient:
+		userMessage = "❌ Invalid client credentials\n   Please update your Maigo CLI"
+	case oauthErrUnauthorized:
+		userMessage = "❌ Client not authorized for token refresh\n   " +
+			"Please run 'maigo auth login' to re-authenticate"
+	default:
+		userMessage = fmt.Sprintf("❌ Token refresh failed - %s\n   "+
+			"Please run 'maigo auth login' to re-authenticate", errorCode)
+	}
+
+	if errorDescription != "" {
+		return fmt.Errorf("%s\n   Details: %s", userMessage, errorDescription)
+	}
+
+	return fmt.Errorf("%s", userMessage)
 }
 
 // GetTokenStatus returns the current authentication status

@@ -33,14 +33,32 @@ func NewConnection(databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Configure connection pool
-	config.MaxConns = 10
-	config.MinConns = 2
+	// Configure connection pool for optimal performance
+	// MaxConns: Maximum number of connections in the pool
+	// For a typical web application: (core_count * 2) + effective_spindle_count
+	config.MaxConns = 25
+
+	// MinConns: Minimum number of connections to maintain
+	// Keeps connections warm for faster response times
+	config.MinConns = 5
+
+	// MaxConnLifetime: Maximum lifetime of a connection
+	// Helps with load balancer connection rotation and prevents stale connections
 	config.MaxConnLifetime = time.Hour
+
+	// MaxConnIdleTime: Maximum time a connection can be idle
+	// Closes idle connections to reduce resource usage
 	config.MaxConnIdleTime = time.Minute * 30
 
+	// HealthCheckPeriod: How often to check connection health
+	// Detects and removes broken connections from the pool
+	config.HealthCheckPeriod = time.Minute
+
+	// ConnectTimeout: Maximum time to wait for a new connection
+	config.ConnConfig.ConnectTimeout = 10 * time.Second
+
 	// Create connection pool
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -53,6 +71,13 @@ func NewConnection(databaseURL string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
+
+	slog.Info("Database connection pool initialized",
+		"max_conns", config.MaxConns,
+		"min_conns", config.MinConns,
+		"max_lifetime", config.MaxConnLifetime,
+		"max_idle_time", config.MaxConnIdleTime,
+	)
 
 	return pool, nil
 }

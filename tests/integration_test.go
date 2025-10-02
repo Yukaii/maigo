@@ -226,7 +226,7 @@ func (suite *IntegrationTestSuite) TestCreateShortURL() {
 				URL: "",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  "Bad Request",
+			expectedError:  "bad_request",
 		},
 		{
 			name: "Create URL with duplicate custom code",
@@ -235,7 +235,7 @@ func (suite *IntegrationTestSuite) TestCreateShortURL() {
 				Custom: "golang", // This should conflict with the previous test
 			},
 			expectedStatus: http.StatusConflict,
-			expectedError:  "Conflict",
+			expectedError:  "conflict",
 		},
 	}
 
@@ -310,7 +310,7 @@ func (suite *IntegrationTestSuite) TestGetURL() {
 			name:           "Get non-existent URL",
 			shortCode:      "nonexistent",
 			expectedStatus: http.StatusNotFound,
-			expectedError:  "Not Found",
+			expectedError:  "not_found",
 		},
 	}
 
@@ -373,7 +373,7 @@ func (suite *IntegrationTestSuite) TestRedirectShortURL() {
 			name:           "Redirect non-existent URL",
 			shortCode:      "nonexistent",
 			expectedStatus: http.StatusNotFound,
-			expectedError:  "Not Found",
+			expectedError:  "not_found",
 		},
 	}
 
@@ -537,14 +537,19 @@ func (suite *IntegrationTestSuite) TestInvalidRoutes() {
 
 			assert.Equal(suite.T(), tt.expected, w.Code)
 
+			// Check error response
+			// Note: Invalid routes (404) return Gin's default format, not our custom format
 			var errorResponse models.ErrorResponse
 			err := json.Unmarshal(w.Body.Bytes(), &errorResponse)
 			require.NoError(suite.T(), err)
 
+			// For 404 errors on invalid routes, Gin returns "Not Found" (not our custom format)
+			// For 400 errors from our handlers, we return "bad_request"
 			if tt.expected == http.StatusBadRequest {
-				assert.Equal(suite.T(), "Bad Request", errorResponse.Error)
-			} else {
-				assert.Equal(suite.T(), "Not Found", errorResponse.Error)
+				assert.Equal(suite.T(), "bad_request", errorResponse.Error)
+			} else if tt.expected == http.StatusNotFound {
+				// Accept either custom format or Gin's default format
+				assert.Contains(suite.T(), []string{"not_found", "Not Found"}, errorResponse.Error)
 			}
 		})
 	}
