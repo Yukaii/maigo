@@ -24,6 +24,9 @@ zig-out/
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
+.env.development
 
 # IDE files
 .vscode/
@@ -44,6 +47,10 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Docker volumes
+data/
+docker-data/
 
 # Database files
 *.db
