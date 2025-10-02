@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: maigo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-maigo}
+      POSTGRES_USER: ${DB_USER:-maigo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-maigo_secret}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-maigo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - maigo-network
+
+  # Maigo Application
+  maigo:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: maigo-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgres://${DB_USER:-maigo}:${DB_PASSWORD:-maigo_secret}@postgres:5432/${DB_NAME:-maigo}?sslmode=disable
+
+      # Server Configuration
+      PORT: ${PORT:-8080}
+      HOST: ${HOST:-0.0.0.0}
+
+      # OAuth Configuration
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      OAUTH2_CLIENT_ID: ${OAUTH2_CLIENT_ID:-maigo-cli}
+      OAUTH2_CLIENT_SECRET: ${OAUTH2_CLIENT_SECRET:-cli-client-secret}
+
+      # Application Configuration
+      GIN_MODE: ${GIN_MODE:-release}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+
+      # Short Code Configuration
+      SHORT_CODE_LENGTH: ${SHORT_CODE_LENGTH:-6}
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - maigo-network
+
+  # Redis (for future caching/rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: maigo-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - maigo-network
+    profiles:
+      - with-cache
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  maigo-network:
+    driver: bridge

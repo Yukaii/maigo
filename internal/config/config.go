@@ -20,6 +20,7 @@ type Config struct {
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	App      AppConfig      `mapstructure:"app"`
 	Log      LogConfig      `mapstructure:"log"`
+	Redis    RedisConfig    `mapstructure:"redis"`
 }
 
 // DatabaseConfig holds database configuration
@@ -82,6 +83,15 @@ type RateLimitConfig struct {
 type LogConfig struct {
 	Level  string `mapstructure:"level"`
 	Format string `mapstructure:"format"`
+}
+
+// RedisConfig holds Redis configuration
+type RedisConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
 }
 
 // Load loads configuration from various sources
@@ -164,6 +174,13 @@ func setDefaults(v *viper.Viper) {
 	// JWT defaults
 	v.SetDefault("jwt.secret", "dev_jwt_secret_change_in_production")
 	v.SetDefault("jwt.expiration", "24h")
+
+	// Redis defaults
+	v.SetDefault("redis.enabled", false)
+	v.SetDefault("redis.host", "localhost")
+	v.SetDefault("redis.port", 6379)
+	v.SetDefault("redis.password", "")
+	v.SetDefault("redis.db", 0)
 
 	// App defaults
 	v.SetDefault("app.name", "Maigo")

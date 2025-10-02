@@ -496,8 +496,93 @@ func (suite *IntegrationTestSuite) TestConcurrentURLCreation() {
 
 // TestRateLimiting tests the rate limiting functionality
 func (suite *IntegrationTestSuite) TestRateLimiting() {
-	// Skip this test as rate limiting configuration is complex to test
-	suite.T().Skip("Rate limiting test requires more complex setup")
+	// Note: Rate limiting is optional and requires Redis
+	// This test verifies that the API works whether or not rate limiting is enabled
+
+	// Create a test user and get auth token
+	username := fmt.Sprintf("ratelimit_user_%d", time.Now().UnixNano())
+	email := fmt.Sprintf("%s@example.com", username)
+	password := "testpassword123"
+
+	// Register user
+	registerBody := models.CreateUserRequest{
+		Username: username,
+		Email:    email,
+		Password: password,
+	}
+	registerJSON, err := json.Marshal(registerBody)
+	require.NoError(suite.T(), err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewBuffer(registerJSON))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+
+	require.Equal(suite.T(), http.StatusCreated, w.Code, "Failed to register user")
+
+	// Parse the registration response which has nested user and tokens
+	var registerResp struct {
+		Message string `json:"message"`
+		User    struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+			Email    string `json:"email"`
+		} `json:"user"`
+		Tokens models.TokenResponse `json:"tokens"`
+	}
+	err = json.Unmarshal(w.Body.Bytes(), &registerResp)
+	require.NoError(suite.T(), err)
+	require.NotEmpty(suite.T(), registerResp.User.ID, "Registration should return user ID")
+
+	// Create a proper JWT for testing (same as other integration tests)
+	token := suite.createTestJWT(registerResp.User.ID, username, email)
+
+	// Make multiple requests to test rate limiting behavior
+	// If Redis is enabled and rate limit is configured, we should eventually get 429
+	// If Redis is not enabled, all requests should succeed with 201
+
+	successCount := 0
+	rateLimitedCount := 0
+
+	// Make 10 rapid requests
+	for i := 0; i < 10; i++ {
+		urlReq := models.CreateURLRequest{
+			URL: fmt.Sprintf("https://example.com/ratelimit-test-%d", i),
+		}
+		urlJSON, err := json.Marshal(urlReq)
+		require.NoError(suite.T(), err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/urls", bytes.NewBuffer(urlJSON))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+		w := httptest.NewRecorder()
+
+		suite.server.ServeHTTP(w, req)
+
+		if w.Code == http.StatusCreated {
+			successCount++
+		} else if w.Code == http.StatusTooManyRequests {
+			rateLimitedCount++
+
+			// Verify rate limit headers are present
+			assert.NotEmpty(suite.T(), w.Header().Get("X-RateLimit-Limit"))
+			assert.NotEmpty(suite.T(), w.Header().Get("X-RateLimit-Remaining"))
+			assert.NotEmpty(suite.T(), w.Header().Get("Retry-After"))
+		} else {
+			// Log unexpected status codes for debugging
+			suite.T().Logf("Request %d: unexpected status %d, body: %s", i, w.Code, w.Body.String())
+		}
+	}
+
+	// We should have at least some successful requests
+	assert.Greater(suite.T(), successCount, 0, "Should have at least some successful requests")
+
+	// Log the results for debugging
+	suite.T().Logf("Rate limiting test results: %d successful, %d rate-limited", successCount, rateLimitedCount)
+
+	// If Redis is enabled, we might see rate limiting. If not, all should succeed.
+	// Either way is valid depending on configuration
+	assert.Equal(suite.T(), 10, successCount+rateLimitedCount, "All requests should either succeed or be rate-limited")
 }
 
 // TestInvalidRoutes tests that invalid routes return 404
