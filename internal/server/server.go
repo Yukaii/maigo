@@ -48,7 +48,9 @@ func NewHTTPServerWithRedis(
 		// Configuration is validated before this constructor is called. Keep a
 		// safe direct-connection policy if a caller constructs Config manually.
 		log.Error("Invalid trusted proxy configuration; forwarded headers disabled", "error", err)
-		_ = engine.SetTrustedProxies(nil)
+		if resetErr := engine.SetTrustedProxies(nil); resetErr != nil {
+			log.Error("Failed to disable forwarded-header trust", "error", resetErr)
+		}
 	}
 
 	// Load HTML templates from embedded filesystem
@@ -75,7 +77,9 @@ func NewHTTPServerWithRedis(
 			corsConfig.AllowCredentials = !containsWildcard(corsOrigins)
 			corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 			corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Authorization", "X-Request-ID"}
-			corsConfig.ExposeHeaders = []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"}
+			corsConfig.ExposeHeaders = []string{
+				"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset",
+			}
 			engine.Use(cors.New(corsConfig))
 		}
 	}

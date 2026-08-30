@@ -349,9 +349,9 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 
 	log.Info("Connected to database", "host", cfg.Database.Host, "port", cfg.Database.Port)
 
-	if err := database.RunMigrations(db); err != nil {
-		log.Error("Failed to run database migrations", "error", err)
-		return fmt.Errorf("failed to run database migrations: %w", err)
+	if migrationErr := database.RunMigrations(db); migrationErr != nil {
+		log.Error("Failed to run database migrations", "error", migrationErr)
+		return fmt.Errorf("failed to run database migrations: %w", migrationErr)
 	}
 	log.Info("Database migrations completed successfully")
 
@@ -359,9 +359,9 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 	oauthServer := oauth.NewServer(db, cfg, log.Logger)
 
 	ctx := context.Background()
-	if err := oauthServer.EnsureDefaultOAuthClient(ctx); err != nil {
-		log.Error("Failed to ensure default OAuth client exists", "error", err)
-		return fmt.Errorf("failed to initialize OAuth client: %w", err)
+	if oauthErr := oauthServer.EnsureDefaultOAuthClient(ctx); oauthErr != nil {
+		log.Error("Failed to ensure default OAuth client exists", "error", oauthErr)
+		return fmt.Errorf("failed to initialize OAuth client: %w", oauthErr)
 	}
 	log.Info("OAuth CLI client initialized successfully")
 

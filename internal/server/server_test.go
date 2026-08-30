@@ -25,7 +25,7 @@ func TestHTTPServerCORSUsesConfiguredOrigins(t *testing.T) {
 	}
 	server := NewHTTPServer(cfg, nil, log)
 
-	allowedRequest := httptest.NewRequest(http.MethodGet, "/health", nil)
+	allowedRequest := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	allowedRequest.Header.Set("Origin", "https://console.example.com")
 	allowedResponse := httptest.NewRecorder()
 	server.ServeHTTP(allowedResponse, allowedRequest)
@@ -34,7 +34,7 @@ func TestHTTPServerCORSUsesConfiguredOrigins(t *testing.T) {
 	assert.Equal(t, "https://console.example.com", allowedResponse.Header().Get("Access-Control-Allow-Origin"))
 	assert.Equal(t, "true", allowedResponse.Header().Get("Access-Control-Allow-Credentials"))
 
-	blockedRequest := httptest.NewRequest(http.MethodGet, "/health", nil)
+	blockedRequest := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	blockedRequest.Header.Set("Origin", "https://untrusted.example.com")
 	blockedResponse := httptest.NewRecorder()
 	server.ServeHTTP(blockedResponse, blockedRequest)
@@ -53,7 +53,7 @@ func TestHTTPServerCORSAllowsWildcardOnlyInDebug(t *testing.T) {
 	}
 	server := NewHTTPServer(cfg, nil, log)
 
-	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	request.Header.Set("Origin", "https://localhost.example")
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)
@@ -75,8 +75,8 @@ func TestHTTPServerDoesNotTrustForwardedIPByDefault(t *testing.T) {
 		c.Status(http.StatusOK)
 	})
 
-	first := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.1")
-	second := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.2")
+	first := serveProxyTestRequest(server, "198.51.100.1")
+	second := serveProxyTestRequest(server, "198.51.100.2")
 
 	assert.Equal(t, http.StatusOK, first.Code)
 	assert.Equal(t, http.StatusTooManyRequests, second.Code)
@@ -95,16 +95,16 @@ func TestHTTPServerUsesConfiguredTrustedProxy(t *testing.T) {
 		c.Status(http.StatusOK)
 	})
 
-	first := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.1")
-	second := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.2")
+	first := serveProxyTestRequest(server, "198.51.100.1")
+	second := serveProxyTestRequest(server, "198.51.100.2")
 
 	assert.Equal(t, http.StatusOK, first.Code)
 	assert.Equal(t, http.StatusOK, second.Code)
 }
 
-func serveProxyTestRequest(server *HTTPServer, remoteAddr, forwardedFor string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodGet, "/proxy-test/limit", nil)
-	request.RemoteAddr = remoteAddr
+func serveProxyTestRequest(server *HTTPServer, forwardedFor string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, "/proxy-test/limit", http.NoBody)
+	request.RemoteAddr = "10.0.0.1:1000"
 	request.Header.Set("X-Forwarded-For", forwardedFor)
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)

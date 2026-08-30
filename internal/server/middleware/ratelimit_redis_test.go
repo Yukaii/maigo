@@ -26,12 +26,12 @@ func TestRateLimiter_RedisAtomic(t *testing.T) {
 	options, err := redis.ParseURL(redisURL)
 	require.NoError(t, err)
 	client := redis.NewClient(options)
-	t.Cleanup(func() { _ = client.Close() })
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	require.NoError(t, client.Ping(context.Background()).Err())
 
 	keyPrefix := fmt.Sprintf("maigo:test:%d", time.Now().UnixNano())
 	t.Cleanup(func() {
-		_ = client.Del(context.Background(), keyPrefix+":ip:192.0.2.1").Err()
+		require.NoError(t, client.Del(context.Background(), keyPrefix+":ip:192.0.2.1").Err())
 	})
 
 	gin.SetMode(gin.TestMode)

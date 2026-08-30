@@ -48,9 +48,7 @@ func RateLimiter(config RateLimitConfig) gin.HandlerFunc {
 		config.KeyPrefix = "ratelimit"
 	}
 
-	return redisRateLimiter(config, func(c *gin.Context) string {
-		return getClientID(c)
-	})
+	return redisRateLimiter(config, getClientID)
 }
 
 func redisRateLimiter(config RateLimitConfig, identifier func(*gin.Context) string) gin.HandlerFunc {

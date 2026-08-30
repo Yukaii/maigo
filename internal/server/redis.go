@@ -43,7 +43,9 @@ func ConnectRedis(ctx context.Context, cfg *config.Config) (*redis.Client, error
 		select {
 		case <-pingCtx.Done():
 			timer.Stop()
-			_ = client.Close()
+			if closeErr := client.Close(); closeErr != nil {
+				return nil, fmt.Errorf("redis health check failed: %w (close: %v)", lastErr, closeErr)
+			}
 			return nil, fmt.Errorf("redis health check failed: %w", lastErr)
 		case <-timer.C:
 		}

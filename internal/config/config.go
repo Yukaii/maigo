@@ -276,19 +276,46 @@ func bindEnvVars(v *viper.Viper) {
 
 // validateConfig validates the configuration
 func validateConfig(cfg *Config) error {
+	if err := validateDatabaseConfig(&cfg.Database); err != nil {
+		return err
+	}
+	if err := validateApplicationConfig(cfg); err != nil {
+		return err
+	}
+	if err := validateTrustedProxies(cfg.App.TrustedProxyList()); err != nil {
+		return err
+	}
+	if err := validateRedisConfig(cfg.Redis); err != nil {
+		return err
+	}
+	if err := validateCORSConfig(&cfg.App); err != nil {
+		return err
+	}
+	if cfg.App.ShortCodeLength < 3 || cfg.App.ShortCodeLength > 10 {
+		return fmt.Errorf("short code length must be between 3 and 10")
+	}
+
+	return nil
+}
+
+func validateDatabaseConfig(database *DatabaseConfig) error {
 	// Database validation - either DATABASE_URL or individual parameters required
-	if cfg.Database.URL == "" {
-		if cfg.Database.Host == "" {
+	if database.URL == "" {
+		if database.Host == "" {
 			return fmt.Errorf("database host is required (or set DATABASE_URL)")
 		}
-		if cfg.Database.Name == "" {
+		if database.Name == "" {
 			return fmt.Errorf("database name is required (or set DATABASE_URL)")
 		}
-		if cfg.Database.User == "" {
+		if database.User == "" {
 			return fmt.Errorf("database user is required (or set DATABASE_URL)")
 		}
 	}
 
+	return nil
+}
+
+func validateApplicationConfig(cfg *Config) error {
 	if cfg.OAuth2.ClientID == "" {
 		return fmt.Errorf("oauth2 client ID is required")
 	}
@@ -298,60 +325,83 @@ func validateConfig(cfg *Config) error {
 	if cfg.JWT.Secret == "" {
 		return fmt.Errorf("jwt secret is required")
 	}
-	if strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "production") {
-		if cfg.App.Debug {
-			return fmt.Errorf("debug must be disabled in production")
-		}
-		if len([]byte(cfg.JWT.Secret)) < 32 {
-			return fmt.Errorf("jwt secret must be at least 32 bytes in production")
-		}
-		if isPlaceholderJWTSecret(cfg.JWT.Secret) {
-			return fmt.Errorf("jwt secret must be replaced with a unique secret in production")
-		}
-		if isPlaceholderDatabasePassword(databasePasswordForValidation(cfg)) {
-			return fmt.Errorf("database password must be replaced with a unique secret in production")
-		}
-		if cfg.Redis.Enabled && isPlaceholderRedisPassword(cfg.Redis.Password) {
-			return fmt.Errorf("redis password must be replaced with a unique secret in production")
-		}
+	if err := validateProductionConfig(cfg); err != nil {
+		return err
 	}
 	if cfg.App.BaseDomain == "" {
 		return fmt.Errorf("base domain is required")
 	}
-	for _, proxy := range cfg.App.TrustedProxyList() {
+
+	return nil
+}
+
+func validateProductionConfig(cfg *Config) error {
+	if !strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "production") {
+		return nil
+	}
+	if cfg.App.Debug {
+		return fmt.Errorf("debug must be disabled in production")
+	}
+	if len([]byte(cfg.JWT.Secret)) < 32 {
+		return fmt.Errorf("jwt secret must be at least 32 bytes in production")
+	}
+	if isPlaceholderJWTSecret(cfg.JWT.Secret) {
+		return fmt.Errorf("jwt secret must be replaced with a unique secret in production")
+	}
+	if isPlaceholderDatabasePassword(databasePasswordForValidation(cfg)) {
+		return fmt.Errorf("database password must be replaced with a unique secret in production")
+	}
+	if cfg.Redis.Enabled && isPlaceholderRedisPassword(cfg.Redis.Password) {
+		return fmt.Errorf("redis password must be replaced with a unique secret in production")
+	}
+
+	return nil
+}
+
+func validateTrustedProxies(proxies []string) error {
+	for _, proxy := range proxies {
 		if net.ParseIP(proxy) == nil {
 			if _, _, err := net.ParseCIDR(proxy); err != nil {
 				return fmt.Errorf("invalid trusted proxy %q: expected an IP address or CIDR", proxy)
 			}
 		}
 	}
-	if cfg.Redis.Enabled {
-		if cfg.Redis.Host == "" {
-			return fmt.Errorf("redis host is required when Redis is enabled")
-		}
-		if cfg.Redis.Port < 1 || cfg.Redis.Port > 65535 {
-			return fmt.Errorf("redis port must be between 1 and 65535")
-		}
-		if cfg.Redis.DB < 0 {
-			return fmt.Errorf("redis database number cannot be negative")
-		}
+
+	return nil
+}
+
+func validateRedisConfig(redisConfig RedisConfig) error {
+	if !redisConfig.Enabled {
+		return nil
 	}
-	if cfg.App.CORSEnabled {
-		origins := cfg.App.AllowedCORSOrigins()
-		if len(origins) == 0 && !cfg.App.Debug {
-			return fmt.Errorf("cors origins are required when CORS is enabled with debug disabled")
-		}
-		for _, origin := range origins {
-			if err := validateCORSOrigin(origin); err != nil {
-				return err
-			}
-			if !cfg.App.Debug && origin == "*" {
-				return fmt.Errorf("wildcard CORS origin is not allowed with debug disabled")
-			}
-		}
+	if redisConfig.Host == "" {
+		return fmt.Errorf("redis host is required when Redis is enabled")
 	}
-	if cfg.App.ShortCodeLength < 3 || cfg.App.ShortCodeLength > 10 {
-		return fmt.Errorf("short code length must be between 3 and 10")
+	if redisConfig.Port < 1 || redisConfig.Port > 65535 {
+		return fmt.Errorf("redis port must be between 1 and 65535")
+	}
+	if redisConfig.DB < 0 {
+		return fmt.Errorf("redis database number cannot be negative")
+	}
+
+	return nil
+}
+
+func validateCORSConfig(app *AppConfig) error {
+	if !app.CORSEnabled {
+		return nil
+	}
+	origins := app.AllowedCORSOrigins()
+	if len(origins) == 0 && !app.Debug {
+		return fmt.Errorf("cors origins are required when CORS is enabled with debug disabled")
+	}
+	for _, origin := range origins {
+		if err := validateCORSOrigin(origin); err != nil {
+			return err
+		}
+		if !app.Debug && origin == "*" {
+			return fmt.Errorf("wildcard CORS origin is not allowed with debug disabled")
+		}
 	}
 
 	return nil
@@ -360,7 +410,7 @@ func validateConfig(cfg *Config) error {
 // AllowedCORSOrigins returns the configured browser origins. Origins are
 // comma-separated so they can be supplied through a single environment
 // variable in a 12-factor deployment.
-func (c AppConfig) AllowedCORSOrigins() []string {
+func (c *AppConfig) AllowedCORSOrigins() []string {
 	var origins []string
 	for _, origin := range strings.Split(c.CORSOrigins, ",") {
 		origin = strings.TrimSpace(origin)
@@ -374,7 +424,7 @@ func (c AppConfig) AllowedCORSOrigins() []string {
 
 // TrustedProxyList returns the configured proxy IPs or CIDR ranges. An empty
 // list intentionally disables forwarded-client-IP trust.
-func (c AppConfig) TrustedProxyList() []string {
+func (c *AppConfig) TrustedProxyList() []string {
 	var proxies []string
 	for _, proxy := range strings.Split(c.TrustedProxies, ",") {
 		proxy = strings.TrimSpace(proxy)
