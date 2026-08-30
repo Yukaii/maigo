@@ -1,250 +1,122 @@
-# Maigo deployment guide
+# Maigo Core deployment
 
-Maigo is a working prototype. The image and Compose setup are useful for a
-production-like evaluation, but review the status document before exposing it
-to untrusted traffic. In particular, use HTTPS, real secret management, and a
-distributed rate limiter.
+Maigo Core is intentionally a single-instance self-hosted service. The
+production topology is one container, one persistent SQLite volume, and one
+ordinary TLS reverse proxy at the edge.
 
 ## Prerequisites
 
 - Docker 20.10+ and Docker Compose v2
-- PostgreSQL 15+ (the included Compose service uses PostgreSQL 16)
-- At least 1 GB RAM for the local stack
+- One host with a persistent disk for the SQLite volume
+- One DNS A/AAAA or CNAME record pointing at the host
+- Caddy, Traefik, Cloudflare, Tailscale, or another TLS reverse proxy
+
+Postgres, Redis, a browser, and a separate migration service are not required.
 
 ## Compose deployment
 
-The tracked docker-compose.yml builds Dockerfile.production, starts PostgreSQL,
-and waits for the database health check before starting Maigo. Migrations run
-automatically when the application starts.
-
-~~~bash
+```bash
 cp .env.production.example .env.production
-# Edit .env.production: set real database and JWT signing credentials at
-# minimum. APP_ENV=production rejects placeholder or short JWT secrets.
+openssl rand -hex 32
+# Put the generated value in API_KEY and set PUBLIC_URL, for example:
+# PUBLIC_URL=https://short.example.com
 
 docker compose --env-file .env.production config --quiet
 docker compose --env-file .env.production up -d --build
 docker compose --env-file .env.production ps
-curl http://localhost:8080/health
-curl http://localhost:8080/health/ready
-~~~
+curl https://short.example.com/health/ready
+```
 
-BASE_DOMAIN should be the public hostname without a trailing slash. Set
-APP_TLS=true only when the public endpoint is HTTPS (usually behind a reverse
-proxy); leave it false for a direct local HTTP deployment. The Compose Redis
-profile is optional. Set REDIS_ENABLED=true and start Compose with
-`--profile with-cache` to use the atomic Redis-backed limiter; otherwise the
-server uses a bounded per-client in-process fallback. Redis failures are
-fail-closed by default when distributed limiting is enabled; use
-REDIS_FAIL_OPEN=true only if that availability trade-off is intentional.
+The Compose service listens on port 8080 inside the container and persists
+`/data/maigo.db` in the named `maigo_data` volume. Set `PORT` to change the
+host-side port mapping. `APP_ENV=production` rejects debug mode and short or
+placeholder API keys.
 
-Stop the services while retaining database volumes:
+Stop the service without removing its data:
 
-~~~bash
+```bash
 docker compose --env-file .env.production stop
-~~~
+```
 
-docker compose down removes containers and networks. docker compose down -v
-also removes the PostgreSQL volume and is destructive.
+`docker compose down` removes the container. Do not use `down -v` unless the
+SQLite volume has been backed up and you intend to remove it.
 
-## Building the image directly
+## DNS and TLS
 
-~~~bash
-docker build -f Dockerfile.production -t maigo:local .
-docker image inspect maigo:local --format '{{.Size}} bytes'
-~~~
+Create one record such as:
 
-The production image runs as the non-root maigo user and includes the tracked
-maigo.example.yaml template. Runtime settings should come from environment
-variables or an explicitly mounted config file.
+```text
+short.example.com  A      <host-ip>
+```
+
+Terminate TLS at the edge and reverse proxy to `127.0.0.1:8080`. A minimal
+Caddyfile is:
+
+```text
+short.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Set `PUBLIC_URL=https://short.example.com` so generated links are canonical.
+Maigo does not create DNS records, request certificates, or manage proxy
+configuration.
 
 ## Configuration
 
-The application accepts either DATABASE_URL or the individual DB_* variables.
-Compose passes individual database variables so passwords containing URL
-punctuation are not accidentally mis-parsed. Common deployment settings:
+The essential settings are:
 
-~~~bash
-DB_HOST=postgres
-DB_PORT=5432
-DB_NAME=maigo
-DB_USER=maigo
-DB_PASSWORD=<strong-password>
-DB_SSL_MODE=disable       # use require with a TLS-enabled external database
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_PATH` | SQLite file path; Compose uses `/data/maigo.db` |
+| `API_KEY` | The single management credential |
+| `PUBLIC_URL` | Canonical origin used in generated links |
+| `HOST` / `PORT` | Listener address; Compose uses `0.0.0.0:8080` |
+| `APP_ENV` | Use `production` for fail-fast secret checks |
+| `SHORT_CODE_LENGTH` | Random code length, from 3 to 10 |
+| `LOG_LEVEL` / `LOG_FORMAT` | Application logging settings |
 
-PORT=8080
-HOST=0.0.0.0
-APP_ENV=production
-TRUSTED_PROXIES=              # exact reverse-proxy IPs/CIDRs, if applicable
-BASE_DOMAIN=short.example.com
-APP_TLS=true              # only when HTTPS is provided at the public edge
-JWT_SECRET=<long-random-secret>
-JWT_EXPIRATION=24h
-SESSION_CLEANUP_INTERVAL=1h  # set to 0 only with an external cleanup policy
-# Or use a rotating key ring. For an existing deployment, keep the old
-# JWT_SECRET during the migration window; omit it for a fresh key-ring setup:
-# JWT_ACTIVE_KEY_ID=primary-2026
-# JWT_KEYS=primary-2026=<secret>,primary-2025=<secret>
-CORS_ENABLED=false
-CORS_ORIGINS=                 # required if CORS_ENABLED=true
-AUTH_RATE_LIMIT_REQUESTS=20
-AUTH_RATE_LIMIT_WINDOW=15m
-DEBUG=false
-LOG_LEVEL=info
-LOG_FORMAT=json
-
-REDIS_ENABLED=false
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=<redis-password>
-REDIS_DB=0
-REDIS_FAIL_OPEN=false
-
-CLICK_EVENT_RETENTION=2160h       # 90 days; Go duration
-CLICK_EVENT_CLEANUP_INTERVAL=1h
-~~~
-
-OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET, and OAUTH2_REDIRECT_URI describe the
-bundled CLI client. The CLI uses PKCE and a localhost callback; this is not yet
-a general-purpose multi-client authorization service.
-
-When browser clients need cross-origin API access, set CORS_ENABLED=true and
-CORS_ORIGINS to a comma-separated list of exact `http://` or `https://`
-origins, without paths. Wildcard CORS is available only when DEBUG=true.
-
-APP_ENV=production enables the production configuration checks. The service
-rejects DEBUG=true and known placeholder JWT, database, or Redis secrets in
-that mode. If Redis is enabled, its connection is verified before the HTTP
-listener starts.
-
-JWT signing supports two modes. The legacy `JWT_SECRET` mode remains compatible
-with tokens issued before key IDs. For a fresh key-ring deployment, leave
-`JWT_SECRET` empty, set `JWT_ACTIVE_KEY_ID`, and provide every active key in
-`JWT_KEYS` as comma-separated `kid=secret` entries. To rotate an existing
-deployment, keep its old `JWT_SECRET`, add the new key ring, deploy the new
-active key to every replica, and switch `JWT_ACTIVE_KEY_ID`. Remove the old
-key-ring entry and legacy `JWT_SECRET` only after the longest access/refresh
-token lifetime they signed has elapsed. Every replica must receive the same
-key ring. These are HMAC secrets, so Maigo does not expose them through a JWKS
-endpoint.
-
-Configuration precedence and all supported variables are documented in the
-README and maigo.example.yaml.
-
-## Migrations
-
-Migrations are applied automatically during server startup. They can also be
-applied from a running Compose service:
-
-~~~bash
-docker compose --env-file .env.production exec maigo /usr/local/bin/maigo migrate up
-docker compose --env-file .env.production exec maigo /usr/local/bin/maigo migrate status
-~~~
-
-Take a backup before a rollback. The application intentionally does not expose
-a destructive migrate down command; use the pinned migrate tool with a
-reachable database URL:
-
-~~~bash
-mise install
-mise exec -- migrate -path internal/database/migrations \
-  -database "$DATABASE_URL" down 1
-~~~
+Configuration can also be supplied in `maigo.yaml`; environment variables take
+precedence. See [`maigo.example.yaml`](maigo.example.yaml) and
+[`api/README.md`](api/README.md).
 
 ## Backups and restore
 
-The scripts use the fixed Compose database container name maigo-postgres.
-Export the production values before invoking them:
+The database is a single SQLite file. The repository includes scripts that
+briefly stop the Compose service, create a compressed archive, and write a
+SHA-256 checksum:
 
-~~~bash
-set -a
-. ./.env.production
-set +a
-
+```bash
 ./scripts/backup.sh
-./scripts/restore.sh backups/maigo_<timestamp>.sql.gz
-~~~
+./scripts/restore.sh backups/maigo_YYYYMMDD_HHMMSS.tar.gz
+```
 
-backup.sh compresses the dump, writes a SHA-256 sidecar, and rotates files
-older than RETENTION_DAYS (30 by default). restore.sh verifies a sidecar when
-present, asks for confirmation, and creates a safety backup first. Test
-restores separately; a backup that has never been restored is not a recovery
-plan.
-
-For an external database, use pg_dump/pg_restore with the database provider's
-credentials and set DATABASE_URL for the application.
-
-## Reverse proxy
-
-Terminate TLS at nginx, Caddy, or a managed load balancer and proxy to the HTTP
-service on port 8080. Forward the original host and scheme:
-
-~~~nginx
-server {
-    listen 443 ssl;
-    server_name short.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/short.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/short.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-~~~
-
-The application does not provision certificates or implement proxy trust
-configuration itself. Keep the app port private when a reverse proxy is in
-front of it. By default, forwarded client-IP headers are ignored. Set
-TRUSTED_PROXIES to the exact proxy IPs or CIDR ranges when the application
-must use them for client-IP rate-limit keys.
+Restore creates a timestamped `maigo_pre_restore_*.tar.gz` safety backup before
+replacing the current database. Keep at least one backup off the host and
+perform a restore drill before relying on the service.
 
 ## Operations
 
-Useful checks:
-
-~~~bash
+```bash
 docker compose --env-file .env.production logs -f maigo
-docker compose --env-file .env.production logs --tail=100 postgres
 docker compose --env-file .env.production exec maigo /usr/local/bin/maigo version
-docker compose --env-file .env.production exec postgres \
-  psql -U "$DB_USER" -d "$DB_NAME" -c 'SELECT 1'
-~~~
+curl https://short.example.com/health
+curl https://short.example.com/health/ready
+```
 
-The /health endpoint is liveness-only; /health/ready also checks the database.
-Monitor both, plus container restarts, database disk usage, backup success, and
-5xx rates.
+`/health` is process liveness. `/health/ready` also checks SQLite. Management
+requests use the API key; redirects and metadata are public. Put any request
+rate limiting, WAF policy, access logging, and abuse controls at the edge.
 
-The server runs click-event retention cleanup in the server process. Set
-`CLICK_EVENT_RETENTION` and `CLICK_EVENT_CLEANUP_INTERVAL` explicitly for the
-deployment’s data-retention policy. Cleanup is batched and safe to run from
-multiple replicas, while lifetime URL hit totals are preserved. The
-`/metrics` endpoint exposes process-local counters; keep it behind a private
-network path or an authenticated reverse-proxy route and scrape it externally.
+## MCP deployment
 
-For horizontal scaling, enable the Redis limiter or put an equivalent policy
-at the edge. Refresh sessions are stored per login/client, so multiple devices
-can remain signed in. The scheduled worker deletes expired session rows in
-batches and is safe to run from multiple replicas; configure its cadence with
-`SESSION_CLEANUP_INTERVAL` (the production default is one hour). The JSON
-logout endpoint is a global logout for the user, while OAuth token revocation
-remains token-specific.
+Run `maigo mcp` wherever the MCP host can reach `PUBLIC_URL`, and provide the
+same `API_KEY` in that process environment. The MCP server uses stdio and
+does not open a network listener of its own.
 
-## Pre-exposure checklist
+## Deliberate limits
 
-- [ ] Replace all example database and JWT secrets.
-- [ ] Set BASE_DOMAIN and APP_TLS for the public endpoint.
-- [ ] Put the service behind HTTPS and an edge/API rate limiter.
-- [ ] Set CORS_ENABLED=false unless a specific browser origin is needed.
-- [ ] Restrict the application port and database port at the network layer.
-- [ ] Configure automated backups and perform a restore drill.
-- [ ] Configure log collection and alerting for readiness failures.
-- [ ] Set click-event retention and scrape `/metrics` with alerts for tracking
-      or retention failures.
-- [ ] Keep refresh-session cleanup enabled and alert on cleanup failures in
-      `/metrics`.
-- [ ] Read docs/STATUS.md and accept its limitations.
+Core is not a horizontally scaled or multi-tenant service. It has no OAuth,
+user accounts, session store, Redis dependency, distributed limiter,
+click-event timeline, app-managed domains, or app-managed TLS. Those are
+separate product decisions, not hidden deployment prerequisites.

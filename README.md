@@ -1,154 +1,136 @@
-# Maigo
+# Maigo Core
 
-Maigo is a small, terminal-first URL shortener written in Go. It has a Gin
-HTTP API, a Cobra CLI, PostgreSQL persistence, OAuth 2.0 authorization-code
-flow with PKCE, and a minimal browser consent screen.
+Maigo Core is a small self-hosted URL shortener for one owner or one trusted
+installation. It keeps the useful parts of the original toy project—short
+links, aliases, expiry, hit counts, a CLI, and automation access—without
+requiring accounts, OAuth, Postgres, or Redis.
 
-This is a polished prototype rather than a finished hosted service. The
-current implementation and verification status are tracked in
-[`docs/STATUS.md`](docs/STATUS.md).
+Core has one API key, one SQLite file, and one application container. See
+[`docs/CORE.md`](docs/CORE.md) for the intentional product boundary and
+[`docs/STATUS.md`](docs/STATUS.md) for the current verification status.
 
-## Quick start
-
-Install the pinned development tools and run the unit suite:
+## Quick start with Docker
 
 ```bash
-make setup
-make test-unit
+cp .env.production.example .env.production
+openssl rand -hex 32
+# Put the generated value in API_KEY and set PUBLIC_URL.
+docker compose --env-file .env.production up -d --build
+curl http://127.0.0.1:8080/health/ready
 ```
 
-For a local database, start PostgreSQL with Compose, load the environment
-template into the shell, and start the server:
+For a local-only development server:
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres
 set -a; . ./.env; set +a
+mise install
 mise exec -- go run ./cmd/maigo server
 ```
 
-The server runs on `http://127.0.0.1:8080` by default and applies embedded
-database migrations on startup. The default Compose database is suitable for
-local development only. Change `JWT_SECRET` and database credentials before
-using the service anywhere shared.
-
-For production token signing, the legacy `JWT_SECRET` setting remains
-compatible. For rotation, configure `JWT_ACTIVE_KEY_ID` and a comma-separated
-`JWT_KEYS` key ring (`kid=secret` entries); retain the previous key until all
-tokens signed with it have expired. When migrating an existing deployment,
-keep the old `JWT_SECRET` set until its no-`kid` tokens have expired, then
-remove it.
+The default database is `data/maigo.db`. It is created and initialized on
+startup; no migration command or external service is needed.
 
 ## CLI
 
-```bash
-maigo auth register <username> <email>
-maigo auth login <username>       # opens the browser-based PKCE flow
-maigo auth status
-maigo auth logout
+The CLI uses the same `PUBLIC_URL` and `API_KEY` as the server. It never opens
+a browser or writes a token file.
 
-maigo shorten <url>
-maigo shorten <url> --custom <code> --ttl 86400
-maigo list --page 1 --page-size 20
-maigo get <short-code>
-maigo stats <short-code>
-maigo delete <short-code> --force
+```bash
+maigo shorten https://example.com --custom docs --ttl 86400
+maigo list
+maigo get docs
+maigo stats docs
+maigo delete docs --force
 ```
 
-The CLI stores its local token file under the platform-specific user config
-directory. `--config path/to/maigo.yaml` and `CONFIG_PATH` select a config
-file; environment variables override file values, and command-line flags
-override both.
+Use `--server URL` and `--api-key KEY` to override configuration for one
+command. Add `--json` to `shorten`, `list`, `get`, `stats`, or `delete` for
+script-friendly output. Configuration can also be supplied with
+`--config path/to/maigo.yaml` or environment variables.
 
-Development tools are pinned in [`mise.toml`](mise.toml): Go, Air,
-golangci-lint, migrate, GoReleaser, and goimports.
+## MCP
 
-`APP_ENV=production` enables fail-fast checks for deployment-safe secrets and
-debug settings. CORS origins are configured with the comma-separated
-`CORS_ORIGINS` variable. Set `REDIS_ENABLED=true` to use the atomic distributed
-rate limiter; when Redis is disabled, the server uses a bounded per-client
-in-process limiter. Forwarded client-IP headers are ignored unless their proxy
-network is listed in `TRUSTED_PROXIES`.
+Run the local MCP server over stdio:
+
+```bash
+maigo mcp
+```
+
+Example client configuration:
+
+```json
+{
+  "mcpServers": {
+    "maigo": {
+      "command": "/usr/local/bin/maigo",
+      "args": ["mcp"],
+      "env": {
+        "PUBLIC_URL": "https://short.example.com",
+        "API_KEY": "replace-with-your-api-key"
+      }
+    }
+  }
+}
+```
+
+The server exposes `shorten_url`, `list_urls`, `get_url`, `get_url_stats`, and
+`delete_url`. It talks to the Maigo HTTP API, so the MCP process needs network
+access to the configured `PUBLIC_URL`.
 
 ## HTTP API
 
-Health:
-
-- `GET /health` — liveness check.
-- `GET /health/ready` — liveness plus database connectivity.
-- `GET /metrics` — process-local Prometheus operational counters; keep private.
-
-Authentication:
-
-- `POST /api/v1/auth/register` — create an account and return tokens.
-- `POST /api/v1/auth/login` — log in with username or email.
-- `POST /api/v1/auth/token` — JSON refresh-token compatibility endpoint.
-- `POST /api/v1/auth/logout` — revoke all refresh sessions for the authenticated user.
-- `GET|POST /oauth/authorize` — browser authorization and consent.
-- `POST /oauth/token` — OAuth authorization-code or refresh-token exchange.
-- `POST /oauth/revoke` — revoke a refresh token.
-
-URL management:
-
-- `POST /api/v1/urls` — create a URL; authentication required.
-- `GET /api/v1/user/urls` — list the authenticated user’s URLs.
-- `GET /api/v1/urls/{code}` — read public URL metadata.
-- `GET /api/v1/urls/{code}/stats` — read owned URL statistics.
-- `DELETE /api/v1/urls/{code}` — delete an owned URL.
-- `GET /{code}` — redirect to the target and count a hit.
-
-See [`api/README.md`](api/README.md) and [`api/openapi.yaml`](api/openapi.yaml)
-for request and response examples.
-
-Click-event cleanup keeps 90 days by default (`CLICK_EVENT_RETENTION=2160h`)
-and runs hourly. Set `CLICK_EVENT_RETENTION=0` to disable cleanup; this is not
-recommended for production.
-
-Each login or OAuth authorization flow gets its own refresh session, so users
-can stay signed in on multiple devices. Expired sessions are deleted hourly by
-default (`SESSION_CLEANUP_INTERVAL=1h`); set it to `0` only when an external
-cleanup policy is in place. The JSON logout endpoint revokes all of the user’s
-refresh sessions.
-
-## Development commands
+Management requests accept either `Authorization: Bearer <API_KEY>` or
+`X-Maigo-API-Key: <API_KEY>`.
 
 ```bash
-make test-unit          # unit tests with race detection
-make test-integration   # resets the configured test DB, then runs integration tests
-make test               # unit + integration
-make build              # build bin/maigo
+curl -X POST https://short.example.com/api/v1/urls \
+  -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/docs","custom":"docs","ttl":86400}'
+
+curl https://short.example.com/docs
+curl -H "Authorization: Bearer $API_KEY" \
+  https://short.example.com/api/v1/urls/docs/stats
+```
+
+See [`api/README.md`](api/README.md) and [`api/openapi.yaml`](api/openapi.yaml)
+for the complete contract.
+
+## DNS and TLS
+
+Point one A/AAAA or CNAME record at the host running the container. Put Caddy,
+Traefik, Cloudflare, Tailscale, or another ordinary edge proxy in front of
+port 8080 to terminate TLS, and set `PUBLIC_URL` to the resulting HTTPS URL.
+Maigo does not provision DNS records or certificates and is intentionally a
+single-instance service.
+
+## Development
+
+```bash
+make setup
+make test       # race-enabled unit and SQLite integration tests
+make build
 make lint
-make fmt-check
 make check-goreleaser
 ```
 
-The integration suite needs PostgreSQL. For an isolated local database:
-
-```bash
-DB_PORT=55432 DB_NAME=maigo_test DB_USER=postgres DB_PASSWORD=password \
-  docker compose -p maigo-audit up -d postgres
-MAIGO_TEST_DATABASE_URL='postgres://postgres:password@localhost:55432/maigo_test?sslmode=disable' \
-  mise exec -- go test ./tests/...
-```
-
-`make test-unit` is the database-free check. `make test-integration` uses
-`scripts/setup_test_db.sh`, which intentionally drops and recreates the
-configured test database.
+The pinned toolchain is in [`mise.toml`](mise.toml). Tests do not require
+Postgres, Redis, a browser, or network access.
 
 ## Project layout
 
 ```text
 cmd/maigo/                 CLI entry point
-internal/cli/              CLI commands and OAuth client
+internal/cli/              HTTP client and CLI commands
 internal/config/           configuration loading and validation
-internal/database/         PostgreSQL connection, migrations, repositories
-internal/oauth/            PKCE, authorization codes, JWT/session handling
-internal/server/           HTTP routes, handlers, middleware, templates
+internal/database/         SQLite schema, repository, and models
+internal/mcpserver/        local stdio MCP tools
+internal/server/           HTTP routes, handlers, and middleware
 internal/shortener/        Base62 and URL validation logic
-tests/                     PostgreSQL-backed integration tests
+tests/                     SQLite-backed HTTP integration tests
 api/                       OpenAPI specification and API notes
-maigo.example.yaml         tracked YAML configuration template
-mise.toml                  pinned local toolchain
+docs/CORE.md               product boundary and stopping point
 ```
 
 ## License

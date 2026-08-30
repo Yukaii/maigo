@@ -59,7 +59,8 @@ release:
     
     Welcome to this new release of Maigo! 🎉
     
-    Maigo is a modern terminal-first URL shortener with OAuth2 authentication.
+    Maigo Core is a small self-hosted URL shortener with SQLite persistence,
+    a CLI, and a local MCP server.
   footer: |
     ## Installation
     
@@ -124,8 +125,8 @@ nfpms:
     homepage: https://github.com/yukaii/maigo
     maintainer: Yukaii <yukai.huang@gmail.com>
     description: |
-      A modern terminal-first URL shortener with OAuth2 authentication.
-      Maigo provides imperative CLI commands for direct URL management and analytics.
+      A small self-hosted URL shortener with SQLite persistence, a CLI, and a
+      local MCP server.
     license: MIT
     formats:
       - deb
@@ -150,7 +151,7 @@ dockers:
     dockerfile: Dockerfile
     build_flag_templates:
       - --label=org.opencontainers.image.title={{.ProjectName}}
-      - --label=org.opencontainers.image.description=A modern terminal-first URL shortener
+      - --label=org.opencontainers.image.description=A small self-hosted URL shortener
       - --label=org.opencontainers.image.url=https://github.com/yukaii/maigo
       - --label=org.opencontainers.image.source=https://github.com/yukaii/maigo
       - --label=org.opencontainers.image.version={{.Version}}

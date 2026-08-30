@@ -1,6 +1,7 @@
 package shortener
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,7 +139,7 @@ func TestEncoder_EncodeDecodeRoundtrip(t *testing.T) {
 	testNumbers := []int64{0, 1, 10, 100, 1000, 10000, 123456789}
 
 	for _, num := range testNumbers {
-		t.Run(string(rune(num)), func(t *testing.T) {
+		t.Run(strconv.FormatInt(num, 10), func(t *testing.T) {
 			encoded := encoder.Encode(num)
 			decoded, err := encoder.Decode(encoded)
 			assert.NoError(t, err)
@@ -590,8 +591,9 @@ func BenchmarkEncoder_Decode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		//nolint:errcheck // benchmark doesn't need error checking
-		encoder.Decode(encoded)
+		if _, err := encoder.Decode(encoded); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -600,7 +602,8 @@ func BenchmarkEncoder_GenerateRandom(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		//nolint:errcheck // benchmark doesn't need error checking
-		encoder.GenerateRandom()
+		if _, err := encoder.GenerateRandom(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

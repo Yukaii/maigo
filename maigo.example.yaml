@@ -1,85 +1,26 @@
-# Maigo URL Shortener Configuration
+# Maigo Core configuration. Environment variables are usually simpler for a
+# container deployment; this file is useful for a local binary installation.
 
-# Database Configuration (12-Factor App Style)
-# Option 1: Use DATABASE_URL (recommended for production)
-# database:
-#   url: postgres://username:password@host:port/dbname?sslmode=require
-
-# Option 2: Individual parameters (development)
 database:
-  # url: "" # Set DATABASE_URL environment variable instead
-  host: localhost
-  port: 5432
-  name: maigo
-  user: postgres
-  password: password
-  ssl_mode: disable
-  max_conns: 10
-  max_idle: 5
+  path: data/maigo.db
 
-# HTTP Server Configuration
 server:
-  port: 8080
   host: 127.0.0.1
-  read_timeout: 30s
-  write_timeout: 30s
-  idle_timeout: 120s
+  port: 8080
+  read_timeout_seconds: 30
+  write_timeout_seconds: 30
+  idle_timeout_seconds: 120
 
-# OAuth2 Configuration
-oauth2:
-  client_id: maigo-cli
-  client_secret: cli-client-secret-not-used-with-pkce
-  redirect_uri: http://localhost:8000/callback
+auth:
+  # Use a random value of at least 32 bytes in production.
+  api_key: dev_maigo_api_key_change_me
 
-# JWT Configuration
-# Legacy single-key compatibility mode. Remove secret for a fresh key ring;
-# retain the old value while migrating tokens without a key ID.
-jwt:
-  secret: dev_jwt_secret_change_in_production
-  expiration: 24h
-  # Set to 0 to disable scheduled expired-session cleanup.
-  session_cleanup_interval: 1h
-  # Rotation mode:
-  # active_key_id: primary-2026
-  # keys:
-  #   - id: primary-2026
-  #     secret: replace-with-a-random-secret-at-least-32-bytes
-  #   - id: primary-2025
-  #     secret: retain-until-previous-tokens-expire
-
-# Application Configuration
 app:
   environment: development
-  base_domain: maigo.dev
-  trusted_proxies: ""
-  tls: false
+  public_url: http://127.0.0.1:8080
   short_code_length: 6
-  debug: true
-  cors_enabled: true
-  cors_origins: ""
-  rate_limit:
-    requests: 100
-    window: 1h
-  auth_rate_limit:
-    requests: 20
-    window: 15m
+  debug: false
 
-# Optional distributed rate limiting
-redis:
-  enabled: false
-  host: localhost
-  port: 6379
-  password: ""
-  db: 0
-  fail_open: false
-
-# Click-event analytics and retention
-analytics:
-  # Go duration. Set to 0 to disable cleanup (not recommended in production).
-  click_event_retention: 2160h
-  cleanup_interval: 1h
-
-# Logging Configuration
 log:
-  level: debug
+  level: info
   format: text

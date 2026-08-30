@@ -1,131 +1,32 @@
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:16-alpine
-    container_name: maigo-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${DB_NAME:-maigo}
-      POSTGRES_USER: ${DB_USER:-maigo}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-maigo_secret}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
-    ports:
-      - "${DB_PORT:-5432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-maigo}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - maigo-network
-
-  # Maigo Application
   maigo:
     build:
       context: .
       dockerfile: Dockerfile.production
     container_name: maigo-app
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      # Database Configuration
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-maigo}
-      DB_USER: ${DB_USER:-maigo}
-      DB_PASSWORD: ${DB_PASSWORD:-maigo_secret}
-      DB_SSL_MODE: ${DB_SSL_MODE:-disable}
-
-      # Server Configuration
-      PORT: ${PORT:-8080}
-      HOST: ${HOST:-0.0.0.0}
+      DATABASE_PATH: /data/maigo.db
+      API_KEY: ${API_KEY:-dev_maigo_api_key_change_me}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      HOST: 0.0.0.0
+      PORT: 8080
       APP_ENV: ${APP_ENV:-development}
-
-      # OAuth Configuration
-      JWT_SECRET: ${JWT_SECRET:-}
-      JWT_ACTIVE_KEY_ID: ${JWT_ACTIVE_KEY_ID:-}
-      JWT_KEYS: ${JWT_KEYS:-}
-      OAUTH2_CLIENT_ID: ${OAUTH2_CLIENT_ID:-maigo-cli}
-      OAUTH2_CLIENT_SECRET: ${OAUTH2_CLIENT_SECRET:-cli-client-secret-not-used-with-pkce}
-      OAUTH2_REDIRECT_URI: ${OAUTH2_REDIRECT_URI:-http://localhost:8000/callback}
-
-      # Application Configuration
-      GIN_MODE: ${GIN_MODE:-release}
+      SHORT_CODE_LENGTH: ${SHORT_CODE_LENGTH:-6}
+      DEBUG: ${DEBUG:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
-      BASE_DOMAIN: ${BASE_DOMAIN:-localhost:8080}
-      APP_TLS: ${APP_TLS:-false}
-      DEBUG: ${DEBUG:-false}
-      CORS_ENABLED: ${CORS_ENABLED:-false}
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
-      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1h}
-      AUTH_RATE_LIMIT_REQUESTS: ${AUTH_RATE_LIMIT_REQUESTS:-20}
-      AUTH_RATE_LIMIT_WINDOW: ${AUTH_RATE_LIMIT_WINDOW:-15m}
-      JWT_EXPIRATION: ${JWT_EXPIRATION:-24h}
-      SESSION_CLEANUP_INTERVAL: ${SESSION_CLEANUP_INTERVAL:-1h}
-
-      # Optional distributed rate limiting
-      REDIS_ENABLED: ${REDIS_ENABLED:-false}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
-      REDIS_DB: ${REDIS_DB:-0}
-      REDIS_FAIL_OPEN: ${REDIS_FAIL_OPEN:-false}
-
-      # Click-event analytics retention
-      CLICK_EVENT_RETENTION: ${CLICK_EVENT_RETENTION:-2160h}
-      CLICK_EVENT_CLEANUP_INTERVAL: ${CLICK_EVENT_CLEANUP_INTERVAL:-1h}
-
-      # Short Code Configuration
-      SHORT_CODE_LENGTH: ${SHORT_CODE_LENGTH:-6}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - maigo_data:/data
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
-    networks:
-      - maigo-network
-
-  # Optional Redis-backed distributed rate limiting
-  redis:
-    image: redis:7-alpine
-    container_name: maigo-redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
-    volumes:
-      - redis_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - maigo-network
-    profiles:
-      - with-cache
 
 volumes:
-  postgres_data:
+  maigo_data:
     driver: local
-  redis_data:
-    driver: local
-
-networks:
-  maigo-network:
-    driver: bridge

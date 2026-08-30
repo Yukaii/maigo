@@ -1,4 +1,4 @@
 #!/bin/bash
-echo "Maigo has been installed successfully!"
+echo "Maigo Core has been installed successfully!"
 echo "Example config: /etc/maigo/maigo.example.yaml"
-echo "Run 'maigo --help' to get started."
+echo "Set PUBLIC_URL and API_KEY, then run 'maigo server'."

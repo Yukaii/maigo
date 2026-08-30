@@ -1,165 +1,77 @@
-# Maigo API
+# Maigo Core API
 
-[`openapi.yaml`](openapi.yaml) is the API contract for the current prototype.
-The server listens on `http://localhost:8080` by default.
+The API is designed for one trusted owner. Redirects and link metadata are
+public; link management uses the installation API key.
 
 ## Authentication
 
-The CLI uses OAuth 2.0 authorization code flow with mandatory PKCE/S256:
+Send either header on protected requests:
 
-1. Generate a 43–128 character code verifier and its SHA-256, base64url code challenge.
-2. Open `/oauth/authorize` with `response_type=code`, `client_id=maigo-cli`,
-   a registered localhost callback, `state`, `code_challenge`, and
-   `code_challenge_method=S256`.
-3. Sign in in the browser and approve the consent page.
-4. Exchange the callback code at `/oauth/token` with the same redirect URI and
-   code verifier.
-5. Send the access token as `Authorization: Bearer <access_token>`.
-
-The bundled CLI performs these steps automatically:
-
-```bash
-maigo auth register alice alice@example.com
-maigo auth login alice
-maigo shorten https://example.com
+```text
+Authorization: Bearer <API_KEY>
+X-Maigo-API-Key: <API_KEY>
 ```
 
-For a manual exchange, the request shape is:
+There are no user accounts, browser login, OAuth endpoints, JWTs, refresh
+tokens, or sessions in Core.
+
+## Endpoints
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/health` | no | Liveness |
+| GET | `/health/ready` | no | Liveness plus SQLite readiness |
+| POST | `/api/v1/urls` | yes | Create a short link |
+| GET | `/api/v1/urls` | yes | List all links |
+| GET | `/api/v1/urls/{code}` | no | Inspect public metadata |
+| GET | `/api/v1/urls/{code}/stats` | yes | Read lifetime hits |
+| DELETE | `/api/v1/urls/{code}` | yes | Delete a link |
+| GET | `/{code}` | no | Redirect and count one hit |
+
+## Create a link
 
 ```bash
-curl -X POST http://localhost:8080/oauth/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'grant_type=authorization_code' \
-  --data-urlencode 'code=<authorization_code>' \
-  --data-urlencode 'client_id=maigo-cli' \
-  --data-urlencode 'redirect_uri=http://localhost:8000/callback' \
-  --data-urlencode 'code_verifier=<code_verifier>'
-```
-
-Access tokens use the configured `JWT_EXPIRATION` (24 hours by default).
-Refresh tokens are rotated and invalidated on logout or revocation; clients
-must persist the newest refresh token after each refresh.
-
-JWT signing supports a rotating HMAC key ring through `JWT_ACTIVE_KEY_ID` and
-`JWT_KEYS`. New tokens carry the active key ID; retain previous keys until the
-longest token lifetime they signed has elapsed. `JWT_SECRET` remains available
-for legacy single-key deployments and migration of tokens without a key ID;
-remove it only after those legacy tokens have expired.
-
-Each login or OAuth authorization flow creates an independent refresh session,
-so multiple devices can remain signed in. Expired sessions are cleaned hourly
-by default (`SESSION_CLEANUP_INTERVAL=1h`), and the JSON logout endpoint
-revokes all refresh sessions for the authenticated user.
-
-## URL operations
-
-Create a URL:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/urls \
-  -H 'Authorization: Bearer <access_token>' \
+curl -X POST http://127.0.0.1:8080/api/v1/urls \
+  -H 'X-Maigo-API-Key: dev_maigo_api_key_change_me' \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com/very/long/url","custom":"mylink","ttl":86400}'
+  -d '{"url":"https://example.com","custom":"home","ttl":86400}'
 ```
 
-List the current user’s URLs:
+`url` accepts HTTP(S) URLs; a missing scheme is treated as HTTPS. `custom` is
+an optional Base62 alias; the reserved root paths `api` and `health` cannot be
+used. `ttl` is in seconds and must be at least 60. Use
+`expires_at` as an RFC3339 timestamp instead of `ttl`; the two fields cannot be
+combined. Omitting both creates a link without an expiry.
+
+Successful responses include `short_code`, `short_url`, `target_url`,
+`created_at`, `hits`, and optional expiration fields. Duplicate aliases return
+HTTP 409. Expired redirects return HTTP 410 and do not increment hits.
+
+## List and statistics
 
 ```bash
-curl 'http://localhost:8080/api/v1/user/urls?page=1&page_size=20' \
-  -H 'Authorization: Bearer <access_token>'
+curl -H 'Authorization: Bearer <API_KEY>' \
+  'http://127.0.0.1:8080/api/v1/urls?page=1&page_size=20'
+
+curl -H 'Authorization: Bearer <API_KEY>' \
+  http://127.0.0.1:8080/api/v1/urls/home/stats
 ```
 
-Read metadata or follow a short code:
+List pages accept `page` and `page_size`; the page size is bounded to 1–100.
+Statistics contain the lifetime `hits` value only. Core does not retain a
+click-event timeline.
 
-```bash
-curl http://localhost:8080/api/v1/urls/mylink
-curl -i http://localhost:8080/mylink
-```
+## Errors
 
-Statistics and deletion are owner-only:
-
-```bash
-curl http://localhost:8080/api/v1/urls/mylink/stats \
-  -H 'Authorization: Bearer <access_token>'
-
-curl -X DELETE http://localhost:8080/api/v1/urls/mylink \
-  -H 'Authorization: Bearer <access_token>'
-```
-
-`ttl` must be at least 60 seconds. Use either `ttl` or `expires_at`, not both;
-an explicit expiration must be in the future. Expired links return HTTP 410
-from the redirect endpoint and do not count a hit. URL metadata remains
-available and includes `expired: true`.
-
-Each successful, non-expired redirect records a click event and updates the
-aggregate `hits` count in one database transaction. The owner-only statistics
-endpoint returns `timeline` as UTC calendar-day buckets. It returns an empty
-array when no clicks have been recorded. If click persistence is temporarily
-unavailable, the redirect still proceeds and the server logs the tracking
-failure. Clicks that occurred before this migration cannot be reconstructed,
-so a legacy URL’s aggregate `hits` value may be larger than the sum of its
-timeline buckets.
-
-## Routes at a glance
-
-- `GET /health` — liveness.
-- `GET /health/ready` — liveness plus PostgreSQL and configured Redis readiness.
-- `GET /metrics` — Prometheus operational counters; restrict it at the network edge.
-- `POST /api/v1/auth/register`, `POST /api/v1/auth/login` — JSON auth helpers.
-- `POST /api/v1/auth/token` — JSON refresh compatibility endpoint.
-- `POST /api/v1/auth/logout` — revoke all refresh sessions for the current user.
-- `GET|POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` — OAuth.
-- `POST /api/v1/urls` — authenticated creation.
-- `GET /api/v1/user/urls` and `GET /api/v1/user/profile` — authenticated user data.
-- `GET /api/v1/urls/{code}` — public metadata.
-- `GET /api/v1/urls/{code}/stats`, `DELETE /api/v1/urls/{code}` — owner operations.
-- `GET /{code}` — public redirect.
-
-URL creation and authentication endpoints are rate limited. With
-`REDIS_ENABLED=true`, limits use an atomic Redis-backed fixed window and are
-shared across replicas; otherwise a bounded per-client in-process limiter is
-used. The in-process mode is not a substitute for an edge/API gateway limiter.
-
-## Error shape
-
-JSON API errors use:
+Errors use this shape:
 
 ```json
 {
-  "error": "bad_request",
-  "message": "Invalid request parameters",
+  "error": "not_found",
+  "message": "Short URL not found",
   "details": null
 }
 ```
 
-OAuth token errors use the same envelope at the HTTP layer, with the OAuth
-error code in `error` (for example, `invalid_grant`).
-
-Authentication and URL-creation endpoints may return `429 rate_limit_exceeded`.
-When Redis-backed limiting is enabled and Redis is unavailable, the protected
-endpoint returns `503 rate_limit_unavailable` instead of bypassing the limit.
-
-## Viewing the OpenAPI file
-
-Open `openapi.yaml` in [Swagger Editor](https://editor.swagger.io/), or run
-Swagger UI locally:
-
-```bash
-docker run --rm -p 8081:8080 \
-  -e SWAGGER_JSON=/api/openapi.yaml \
-  -v "$PWD/api:/api" swaggerapi/swagger-ui
-```
-
-Then visit <http://localhost:8081>.
-
-## Current limitations
-
-Click events are retained for 90 days by default and cleaned up hourly. Set
-`CLICK_EVENT_RETENTION=0` to disable cleanup, which is not recommended in
-production. Configure HTTPS, Redis or an edge limiter for horizontal scale,
-and a real secret manager for any deployment beyond local development. See
-[`docs/STATUS.md`](../docs/STATUS.md) for the fuller audit and next steps.
-
-## License
-
-MIT License — see [`LICENSE`](../LICENSE).
+The authoritative machine-readable contract is
+[`openapi.yaml`](openapi.yaml).

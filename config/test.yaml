@@ -1,50 +1,22 @@
-app:
-  name: "Maigo Test"
-  environment: test
-  debug: true
-  cors_enabled: true
-  cors_origins: ""
-  tls: false
-  short_code_length: 6
-  base_domain: "localhost:8080"
-  trusted_proxies: ""
-  rate_limit:
-    requests: 100
-    window: 1h
-  auth_rate_limit:
-    requests: 20
-    window: 15m
+database:
+  path: :memory:
 
 server:
+  host: 127.0.0.1
   port: 8080
-  host: "0.0.0.0"
-  read_timeout: "30s"
-  write_timeout: "30s"
-  idle_timeout: "120s"
+  read_timeout_seconds: 30
+  write_timeout_seconds: 30
+  idle_timeout_seconds: 120
 
-database:
-  host: "localhost"
-  port: 5432
-  name: "maigo_test"
-  user: "postgres"
-  password: "password"
-  ssl_mode: "disable"
-  max_conns: 10
-  max_idle: 5
+auth:
+  api_key: test_api_key
 
-jwt:
-  secret: "test-secret-key-for-testing-only"
-  expiration: "15m"
-
-oauth2:
-  client_id: "maigo-cli"
-  client_secret: "cli-client-secret-not-used-with-pkce"
-  redirect_uri: "http://localhost:8000/callback"
-
-analytics:
-  click_event_retention: "2160h"
-  cleanup_interval: "1h"
+app:
+  environment: test
+  public_url: http://127.0.0.1:8080
+  short_code_length: 6
+  debug: true
 
 log:
-  level: "debug"
-  format: "text"
+  level: error
+  format: text

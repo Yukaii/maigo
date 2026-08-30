@@ -1,727 +1,387 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: Maigo URL Shortener API
-  version: 0.1.0
-  description: |
-    Maigo is a terminal-first URL shortener backed by PostgreSQL.
-
-    The CLI uses the OAuth 2.0 authorization-code flow with mandatory PKCE
-    (S256). Access tokens are JWTs. Refresh tokens are rotated and persisted
-    server-side so logout and revocation take effect.
+  title: Maigo Core API
+  version: 1.0.0
+  description: A small self-hosted URL shortener with SQLite persistence.
 servers:
-  - url: http://localhost:8080
-    description: Local development server
+  - url: http://127.0.0.1:8080
+    description: Local development
 tags:
   - name: Health
-  - name: Operations
-  - name: OAuth 2.0
-  - name: Authentication
   - name: URLs
+security:
+  - bearerAuth: []
+  - apiKey: []
 paths:
   /health:
     get:
       tags: [Health]
-      summary: Liveness check
       security: []
+      operationId: health
       responses:
         '200':
-          description: Server is healthy
+          description: Process is alive
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: { type: string, example: ok }
-                  service: { type: string, example: maigo }
-                  version: { type: string, example: dev }
-                  message: { type: string, example: Server is healthy and running }
-
+                $ref: '#/components/schemas/Health'
   /health/ready:
     get:
       tags: [Health]
-      summary: Readiness check
       security: []
-      description: Checks PostgreSQL and, when enabled, the Redis rate-limit dependency.
+      operationId: readiness
       responses:
         '200':
-          description: Server and database are ready
+          description: Process and SQLite database are ready
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: { type: string, example: ready }
-                  service: { type: string, example: maigo }
-                  database: { type: string, example: healthy }
-                  redis: { type: string, example: healthy, description: Present when Redis is enabled }
+                $ref: '#/components/schemas/Readiness'
         '503':
-          description: Database is unavailable
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /metrics:
-    get:
-      tags: [Operations]
-      summary: Prometheus operational metrics
-      security: []
-      description: Returns process-local counters. Restrict this endpoint at the network edge or through an authenticated proxy.
-      responses:
-        '200':
-          description: Prometheus text exposition
-          content:
-            text/plain:
-              schema: { type: string }
-
-  /oauth/authorize:
-    get:
-      tags: [OAuth 2.0]
-      summary: Begin authorization-code flow
-      security: []
-      description: |
-        Validates the client, redirect URI, and S256 PKCE challenge, then
-        renders the login/consent page. The browser session is a short-lived
-        HttpOnly cookie and is not a public API token input.
-      parameters:
-        - $ref: '#/components/parameters/ResponseType'
-        - $ref: '#/components/parameters/ClientID'
-        - $ref: '#/components/parameters/RedirectURI'
-        - $ref: '#/components/parameters/Scope'
-        - $ref: '#/components/parameters/State'
-        - $ref: '#/components/parameters/CodeChallenge'
-        - $ref: '#/components/parameters/CodeChallengeMethod'
-      responses:
-        '200':
-          description: HTML login or consent page
-          content:
-            text/html:
-              schema: { type: string }
-        '400':
-          description: Invalid OAuth request
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-    post:
-      tags: [OAuth 2.0]
-      summary: Submit login or consent decision
-      security: []
-      description: |
-        The browser form submits `action=login`, `action=authorize`, or
-        `action=deny`. The user identity is taken from the signed HttpOnly
-        browser session cookie, never from a hidden user ID field.
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/AuthorizationForm'
-      responses:
-        '200':
-          description: Login error page or consent page
-          content:
-            text/html:
-              schema: { type: string }
-        '302':
-          description: Redirect to the validated client redirect URI
-        '400':
-          description: Invalid OAuth request
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /oauth/token:
-    post:
-      tags: [OAuth 2.0]
-      summary: Exchange or refresh tokens
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              oneOf:
-                - $ref: '#/components/schemas/AuthorizationCodeTokenRequest'
-                - $ref: '#/components/schemas/RefreshTokenRequest'
-      responses:
-        '200':
-          description: Token pair
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TokenPair' }
-        '400':
-          description: Invalid OAuth request or grant
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Invalid client
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /oauth/revoke:
-    post:
-      tags: [OAuth 2.0]
-      summary: Revoke a token
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              type: object
-              required: [token]
-              properties:
-                token: { type: string }
-      responses:
-        '200':
-          description: Token is revoked or was already unknown
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message: { type: string, example: Token revoked successfully }
-        '400':
-          description: Missing token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /api/v1/auth/register:
-    post:
-      tags: [Authentication]
-      summary: Register a user
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/RegisterRequest' }
-      responses:
-        '201':
-          description: User and initial token pair
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RegisterResponse' }
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '409':
-          description: Username or email already exists
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /api/v1/auth/login:
-    post:
-      tags: [Authentication]
-      summary: Log in with username or email
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LoginRequest' }
-      responses:
-        '200':
-          description: Token pair
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TokenPair' }
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Invalid credentials
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /api/v1/auth/token:
-    post:
-      tags: [Authentication]
-      summary: Refresh token compatibility endpoint
-      security: []
-      description: JSON endpoint retained for the original CLI/API client.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [refresh_token]
-              properties:
-                refresh_token: { type: string }
-      responses:
-        '200':
-          description: Rotated token pair
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TokenPair' }
-        '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Invalid or expired refresh token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /api/v1/auth/logout:
-    post:
-      tags: [Authentication]
-      summary: Revoke all authenticated user sessions
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: All refresh sessions revoked
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message: { type: string, example: Logged out successfully }
-        '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/user/profile:
-    get:
-      tags: [Authentication]
-      summary: Get the current user profile
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: User profile
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/UserProfile' }
-        '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/urls:
     post:
       tags: [URLs]
-      summary: Create a short URL
-      description: Requires an access token. The target accepts http and https URLs. Requests are rate limited.
-      security: [{ bearerAuth: [] }]
+      operationId: createURL
+      summary: Create a short link
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateURLRequest' }
+            schema:
+              $ref: '#/components/schemas/CreateURLRequest'
       responses:
         '201':
-          description: Short URL created
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/URLMetadata' }
-        '400':
-          description: Invalid URL or expiration
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '409':
-          description: Short-code conflict
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '503':
-          $ref: '#/components/responses/DependencyUnavailable'
-
-  /api/v1/user/urls:
-    get:
-      tags: [URLs]
-      summary: List the current user’s URLs
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: page
-          in: query
-          schema: { type: integer, minimum: 1, default: 1 }
-        - name: page_size
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-      responses:
-        '200':
-          description: Paginated URL list
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/URLListResponse' }
-        '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/urls/{code}:
-    parameters:
-      - name: code
-        in: path
-        required: true
-        schema: { type: string, pattern: '^[0-9A-Za-z]{1,50}$' }
-    get:
-      tags: [URLs]
-      summary: Get public URL metadata
-      security: []
-      responses:
-        '200':
-          description: URL metadata
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/URLMetadata' }
-        '400':
-          description: Invalid short code
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: Short URL not found
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-    delete:
-      tags: [URLs]
-      summary: Delete an owned URL
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: URL deleted
+          description: Link created
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message: { type: string, example: URL deleted successfully }
+                $ref: '#/components/schemas/URL'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '403':
-          description: URL belongs to another user
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: Short URL not found
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/urls/{code}/stats:
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
     get:
       tags: [URLs]
-      summary: Get owned URL statistics
-      security: [{ bearerAuth: [] }]
+      operationId: listURLs
+      summary: List all links
       parameters:
-        - name: code
-          in: path
-          required: true
-          schema: { type: string, pattern: '^[0-9A-Za-z]{1,50}$' }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
         '200':
-          description: URL statistics
+          description: Paginated links
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/URLStats' }
+              schema:
+                $ref: '#/components/schemas/URLList'
         '401':
-          description: Missing or invalid access token
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '403':
-          description: URL belongs to another user
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-        '404':
-          description: Short URL not found
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /{code}:
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/urls/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
     get:
       tags: [URLs]
-      summary: Redirect to the target URL
       security: []
-      parameters:
-        - name: code
-          in: path
-          required: true
-          schema: { type: string, pattern: '^[0-9A-Za-z]{1,50}$' }
+      operationId: getURL
+      summary: Inspect a short link
+      responses:
+        '200':
+          description: Link metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/URL'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [URLs]
+      operationId: deleteURL
+      summary: Delete a short link
+      responses:
+        '200':
+          description: Link deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/urls/{code}/stats:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      tags: [URLs]
+      operationId: getURLStats
+      summary: Read lifetime hit count
+      responses:
+        '200':
+          description: Lifetime statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/URLStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      tags: [URLs]
+      security: []
+      operationId: redirectURL
+      summary: Redirect to the target URL
       responses:
         '302':
-          description: Redirect to target URL after recording a click event and updating the aggregate hit count. Redirects remain available if click persistence is temporarily unavailable.
+          description: Redirect
           headers:
             Location:
-              schema: { type: string, format: uri }
-        '400':
-          description: Invalid short code
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              required: true
+              schema:
+                type: string
+                format: uri
         '404':
-          description: Short URL not found
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+          $ref: '#/components/responses/NotFound'
         '410':
-          description: URL has expired
+          description: Link has expired
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
-
-  responses:
-    RateLimited:
-      description: Request limit exceeded
-      headers:
-        X-RateLimit-Limit:
-          schema: { type: integer }
-        X-RateLimit-Remaining:
-          schema: { type: integer }
-        X-RateLimit-Reset:
-          schema: { type: integer, format: int64 }
-        Retry-After:
-          schema: { type: integer, description: Seconds until retry }
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/Error' }
-    DependencyUnavailable:
-      description: Rate-limit dependency is unavailable
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/Error' }
-
+      description: The configured Maigo API key as a bearer token.
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-Maigo-API-Key
   parameters:
-    ResponseType:
-      name: response_type
-      in: query
+    Code:
+      name: code
+      in: path
       required: true
-      schema: { type: string, enum: [code] }
-    ClientID:
-      name: client_id
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 50
+        pattern: '^[0-9A-Za-z]+$'
+    Page:
+      name: page
       in: query
-      required: true
-      schema: { type: string, example: maigo-cli }
-    RedirectURI:
-      name: redirect_uri
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
       in: query
-      required: true
-      schema: { type: string, format: uri, example: http://localhost:8000/callback }
-    Scope:
-      name: scope
-      in: query
-      schema: { type: string, example: read write }
-    State:
-      name: state
-      in: query
-      required: true
-      schema: { type: string }
-    CodeChallenge:
-      name: code_challenge
-      in: query
-      required: true
-      schema: { type: string, minLength: 43, maxLength: 128 }
-    CodeChallengeMethod:
-      name: code_challenge_method
-      in: query
-      required: true
-      schema: { type: string, enum: [S256] }
-
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Alias already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Link or route not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: SQLite is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
-    Error:
-      type: object
-      properties:
-        error: { type: string, example: bad_request }
-        message: { type: string, example: Invalid request parameters }
-        details:
-          type: string
-          nullable: true
-          description: Optional validation details
-
-    RegisterRequest:
-      type: object
-      required: [username, email, password]
-      properties:
-        username: { type: string, minLength: 3, maxLength: 50, pattern: '^[A-Za-z0-9]+$' }
-        email: { type: string, format: email }
-        password: { type: string, format: password, minLength: 6 }
-
-    LoginRequest:
-      type: object
-      required: [username, password]
-      properties:
-        username: { type: string }
-        password: { type: string, format: password }
-
-    TokenPair:
-      type: object
-      required: [access_token, refresh_token, token_type, expires_in]
-      properties:
-        access_token: { type: string }
-        refresh_token: { type: string }
-        token_type: { type: string, example: Bearer }
-        expires_in: { type: integer, description: Access-token lifetime in seconds, example: 86400 }
-
-    RegisterResponse:
-      type: object
-      required: [message, user, tokens]
-      properties:
-        message: { type: string, example: Registration successful }
-        user: { $ref: '#/components/schemas/UserProfile' }
-        tokens: { $ref: '#/components/schemas/TokenPair' }
-
-    AuthorizationForm:
-      type: object
-      required: [response_type, client_id, redirect_uri, code_challenge, code_challenge_method, action]
-      properties:
-        response_type: { type: string, enum: [code] }
-        client_id: { type: string }
-        redirect_uri: { type: string, format: uri }
-        scope: { type: string }
-        state: { type: string }
-        code_challenge: { type: string }
-        code_challenge_method: { type: string, enum: [S256] }
-        action: { type: string, enum: [login, authorize, deny] }
-        username: { type: string }
-        password: { type: string, format: password }
-
-    AuthorizationCodeTokenRequest:
-      type: object
-      required: [grant_type, code, redirect_uri, client_id, code_verifier]
-      properties:
-        grant_type: { type: string, enum: [authorization_code] }
-        code: { type: string }
-        redirect_uri: { type: string, format: uri }
-        client_id: { type: string }
-        code_verifier: { type: string, minLength: 43, maxLength: 128 }
-
-    RefreshTokenRequest:
-      type: object
-      required: [grant_type, refresh_token, client_id]
-      properties:
-        grant_type: { type: string, enum: [refresh_token] }
-        refresh_token: { type: string }
-        client_id: { type: string }
-
-    UserProfile:
-      type: object
-      properties:
-        id: { type: integer, format: int64 }
-        username: { type: string }
-        email: { type: string, format: email }
-        created_at: { type: string, format: date-time }
-
     CreateURLRequest:
       type: object
       required: [url]
+      additionalProperties: false
       properties:
-        url: { type: string, format: uri, example: https://example.com/long/path }
-        custom: { type: string, minLength: 3, maxLength: 50, pattern: '^[A-Za-z0-9]+$' }
-        ttl: { type: integer, format: int64, minimum: 60, description: Lifetime in seconds }
-        expires_at: { type: string, format: date-time, description: Alternative to ttl }
-
+        url:
+          type: string
+          format: uri
+          description: HTTP or HTTPS target URL.
+        custom:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: '^[0-9A-Za-z]+$'
+        ttl:
+          type: integer
+          format: int64
+          minimum: 60
+          description: Lifetime in seconds; mutually exclusive with expires_at.
+        expires_at:
+          type: string
+          format: date-time
+          description: Future RFC3339 expiry; mutually exclusive with ttl.
     URL:
       type: object
+      required: [id, short_code, url, target_url, short_url, created_at, hits]
       properties:
-        id: { type: integer, format: int64 }
-        short_code: { type: string }
-        target_url: { type: string, format: uri }
-        created_at: { type: string, format: date-time }
-        expires_at: { type: string, format: date-time, nullable: true }
-        hits: { type: integer, format: int64 }
-        user_id: { type: integer, format: int64, nullable: true }
-
-    URLMetadata:
-      allOf:
-        - $ref: '#/components/schemas/URL'
-        - type: object
-          properties:
-            url: { type: string, format: uri, description: Backward-compatible alias for target_url }
-            short_url: { type: string, format: uri }
-            expired: { type: boolean }
-            expires_in: { type: integer, format: int64 }
-
-    URLListResponse:
+        id:
+          type: integer
+          format: int64
+        short_code:
+          type: string
+        url:
+          type: string
+          format: uri
+        target_url:
+          type: string
+          format: uri
+        short_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        expired:
+          type: boolean
+        hits:
+          type: integer
+          format: int64
+    URLStats:
       type: object
+      required: [id, short_code, url, short_url, created_at, hits]
+      properties:
+        id:
+          type: integer
+          format: int64
+        short_code:
+          type: string
+        url:
+          type: string
+          format: uri
+        short_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        hits:
+          type: integer
+          format: int64
+    URLList:
+      type: object
+      required: [urls, pagination]
       properties:
         urls:
           type: array
-          items: { $ref: '#/components/schemas/URL' }
+          items:
+            $ref: '#/components/schemas/URLListItem'
         pagination:
-          type: object
-          properties:
-            page: { type: integer }
-            page_size: { type: integer }
-            total: { type: integer, format: int64 }
-            pages: { type: integer }
-
-    URLStats:
-      allOf:
-        - $ref: '#/components/schemas/URLMetadata'
-        - type: object
-          properties:
-            timeline:
-              type: array
-              description: Click counts grouped by UTC calendar day. Empty when the URL has no recorded clicks. Legacy aggregate hits from before click-event tracking are not reconstructed.
-              items:
-                type: object
-                required: [date, hits]
-                properties:
-                  date: { type: string, format: date }
-                  hits: { type: integer, format: int64 }
+          $ref: '#/components/schemas/Pagination'
+    URLListItem:
+      type: object
+      required: [id, short_code, target_url, created_at, hits]
+      properties:
+        id:
+          type: integer
+          format: int64
+        short_code:
+          type: string
+        target_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        hits:
+          type: integer
+          format: int64
+    Pagination:
+      type: object
+      required: [page, page_size, total, pages]
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+        pages:
+          type: integer
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: maigo
+    Readiness:
+      type: object
+      required: [status, service, database]
+      properties:
+        status:
+          type: string
+          example: ready
+        service:
+          type: string
+          example: maigo
+        database:
+          type: string
+          example: healthy
+    Success:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          nullable: true

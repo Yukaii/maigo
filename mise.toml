@@ -1,7 +1,5 @@
 [tools]
-go = "1.23.12"
-air = "1.61.7"
-golangci-lint = "1.64.5"
-gomigrate = "4.18.3"
+go = "1.25.14"
+golangci-lint = "2.13.2"
 goreleaser = "2.18.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.30.0"
