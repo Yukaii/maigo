@@ -3,7 +3,7 @@
 Maigo is a working prototype. The image and Compose setup are useful for a
 production-like evaluation, but review the status document before exposing it
 to untrusted traffic. In particular, use HTTPS, real secret management, and a
-distributed edge rate limiter.
+distributed rate limiter.
 
 ## Prerequisites
 
@@ -32,8 +32,11 @@ curl http://localhost:8080/health/ready
 BASE_DOMAIN should be the public hostname without a trailing slash. Set
 APP_TLS=true only when the public endpoint is HTTPS (usually behind a reverse
 proxy); leave it false for a direct local HTTP deployment. The Compose Redis
-profile is not required and is not connected to the current server; the active
-URL-create limiter is process-local.
+profile is optional. Set REDIS_ENABLED=true and start Compose with
+`--profile with-cache` to use the atomic Redis-backed limiter; otherwise the
+server uses a bounded per-client in-process fallback. Redis failures are
+fail-closed by default when distributed limiting is enabled; use
+REDIS_FAIL_OPEN=true only if that availability trade-off is intentional.
 
 Stop the services while retaining database volumes:
 
@@ -71,15 +74,26 @@ DB_SSL_MODE=disable       # use require with a TLS-enabled external database
 
 PORT=8080
 HOST=0.0.0.0
+APP_ENV=production
+TRUSTED_PROXIES=              # exact reverse-proxy IPs/CIDRs, if applicable
 BASE_DOMAIN=short.example.com
 APP_TLS=true              # only when HTTPS is provided at the public edge
 JWT_SECRET=<long-random-secret>
 JWT_EXPIRATION=24h
 CORS_ENABLED=false
 CORS_ORIGINS=                 # required if CORS_ENABLED=true
+AUTH_RATE_LIMIT_REQUESTS=20
+AUTH_RATE_LIMIT_WINDOW=15m
 DEBUG=false
 LOG_LEVEL=info
 LOG_FORMAT=json
+
+REDIS_ENABLED=false
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=<redis-password>
+REDIS_DB=0
+REDIS_FAIL_OPEN=false
 ~~~
 
 OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET, and OAUTH2_REDIRECT_URI describe the
@@ -89,6 +103,11 @@ a general-purpose multi-client authorization service.
 When browser clients need cross-origin API access, set CORS_ENABLED=true and
 CORS_ORIGINS to a comma-separated list of exact `http://` or `https://`
 origins, without paths. Wildcard CORS is available only when DEBUG=true.
+
+APP_ENV=production enables the production configuration checks. The service
+rejects DEBUG=true and known placeholder JWT, database, or Redis secrets in
+that mode. If Redis is enabled, its connection is verified before the HTTP
+listener starts.
 
 Configuration precedence and all supported variables are documented in the
 README and maigo.example.yaml.
@@ -161,7 +180,9 @@ server {
 
 The application does not provision certificates or implement proxy trust
 configuration itself. Keep the app port private when a reverse proxy is in
-front of it.
+front of it. By default, forwarded client-IP headers are ignored. Set
+TRUSTED_PROXIES to the exact proxy IPs or CIDR ranges when the application
+must use them for client-IP rate-limit keys.
 
 ## Operations
 
@@ -179,8 +200,8 @@ The /health endpoint is liveness-only; /health/ready also checks the database.
 Monitor both, plus container restarts, database disk usage, backup success, and
 5xx rates.
 
-Do not horizontally scale the service without replacing the process-local
-limiter and deciding how refresh sessions should work across devices. The
+For horizontal scaling, enable the Redis limiter or put an equivalent policy
+at the edge, and decide how refresh sessions should work across devices. The
 current schema intentionally permits one active refresh session per user.
 
 ## Pre-exposure checklist

@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 DB_HOST=${DB_HOST:-localhost}
 DB_PORT=${DB_PORT:-5432}
 DB_USER=${DB_USER:-postgres}
@@ -35,4 +38,4 @@ echo "  Database: $DB_NAME"
 echo "  User: $DB_USER"
 echo ""
 echo "You can now run integration tests with:"
-echo "  CONFIG_PATH=config/test.yaml go test ./tests/... -v"
+echo "  CONFIG_PATH=$PROJECT_ROOT/config/test.yaml go test ./tests/... -v"

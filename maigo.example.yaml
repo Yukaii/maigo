@@ -40,6 +40,7 @@ jwt:
 app:
   environment: development
   base_domain: maigo.dev
+  trusted_proxies: ""
   tls: false
   short_code_length: 6
   debug: true
@@ -48,6 +49,18 @@ app:
   rate_limit:
     requests: 100
     window: 1h
+  auth_rate_limit:
+    requests: 20
+    window: 15m
+
+# Optional distributed rate limiting
+redis:
+  enabled: false
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+  fail_open: false
 
 # Logging Configuration
 log:

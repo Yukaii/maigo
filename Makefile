@@ -1,4 +1,4 @@
-.PHONY: help setup build test test-unit test-integration test-setup test-clean lint fmt clean dev server migrate-up migrate-down db-setup db-reset db-seed
+.PHONY: help setup build test test-unit test-integration test-redis test-setup test-clean lint fmt clean dev server migrate-up migrate-down db-setup db-reset db-seed
 .DEFAULT_GOAL := help
 
 # Variables
@@ -56,7 +56,12 @@ test-unit:
 ## test-integration: Run integration tests
 test-integration: test-setup
 	@echo "Running integration tests..."
-	CONFIG_PATH=config/test.yaml $(MISE) go test -v ./tests/...
+	CONFIG_PATH=$(CURDIR)/config/test.yaml $(MISE) go test -v ./tests/...
+
+## test-redis: Run the Redis-backed limiter test (requires MAIGO_TEST_REDIS_URL)
+test-redis:
+	@if [ -z "$(MAIGO_TEST_REDIS_URL)" ]; then echo "Set MAIGO_TEST_REDIS_URL first."; exit 1; fi
+	$(MISE) go test -v ./internal/server/middleware -run TestRateLimiter_RedisAtomic
 
 ## test-setup: Set up test database
 test-setup:

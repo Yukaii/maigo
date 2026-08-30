@@ -7,6 +7,13 @@ app:
   tls: false
   short_code_length: 6
   base_domain: "localhost:8080"
+  trusted_proxies: ""
+  rate_limit:
+    requests: 100
+    window: 1h
+  auth_rate_limit:
+    requests: 20
+    window: 15m
 
 server:
   port: 8080

@@ -365,8 +365,24 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 	}
 	log.Info("OAuth CLI client initialized successfully")
 
+	// Initialize optional distributed rate limiting. When explicitly enabled,
+	// Redis must be reachable before the HTTP server accepts traffic.
+	redisClient, err := server.ConnectRedis(context.Background(), cfg)
+	if err != nil {
+		log.Error("Failed to connect to Redis", "error", err)
+		return fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+	if redisClient != nil {
+		log.Info("Connected to Redis", "host", cfg.Redis.Host, "port", cfg.Redis.Port)
+	}
+
 	// Initialize HTTP server
-	httpServer := server.NewHTTPServer(cfg, db, log)
+	httpServer := server.NewHTTPServerWithRedis(cfg, db, log, redisClient)
+	defer func() {
+		if err := httpServer.Shutdown(); err != nil {
+			log.Error("Failed to shut down HTTP server dependencies", "error", err)
+		}
+	}()
 
 	// Create HTTP server instance
 	srv := &http.Server{

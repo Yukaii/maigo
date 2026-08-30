@@ -2,8 +2,8 @@
 package middleware
 
 import (
-	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,168 +12,193 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RateLimitConfig holds rate limiting configuration
+// RateLimitConfig holds the settings for a Redis-backed rate limiter.
 type RateLimitConfig struct {
-	// Requests per window
+	// Requests per window.
 	Limit int
-	// Window duration
+	// Window duration.
 	Window time.Duration
-	// Redis client
+	// Redis client.
 	RedisClient *redis.Client
-	// Key prefix for Redis
+	// Key prefix for Redis.
 	KeyPrefix string
+	// FailOpen allows requests through when Redis is unavailable. The secure
+	// default is false, so explicitly enabled distributed limiting cannot be
+	// silently bypassed during a Redis outage.
+	FailOpen bool
 }
 
-// RateLimiter creates a rate limiting middleware
+var fixedWindowScript = redis.NewScript(`
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+local ttl = redis.call('PTTL', KEYS[1])
+return {count, ttl}
+`)
+
+// RateLimiter creates an atomic fixed-window rate limiter backed by Redis.
+// Requests are identified by the authenticated user when available and by
+// client IP otherwise.
 func RateLimiter(config RateLimitConfig) gin.HandlerFunc {
-	if config.RedisClient == nil {
-		// If Redis is not configured, return a no-op middleware
-		return func(c *gin.Context) {
-			c.Next()
-		}
+	if config.RedisClient == nil || config.Limit <= 0 || config.Window <= 0 {
+		return passThrough()
 	}
-
-	if config.Limit == 0 {
-		config.Limit = 100 // Default: 100 requests
-	}
-
-	if config.Window == 0 {
-		config.Window = time.Minute // Default: per minute
-	}
-
 	if config.KeyPrefix == "" {
 		config.KeyPrefix = "ratelimit"
 	}
 
+	return redisRateLimiter(config, func(c *gin.Context) string {
+		return getClientID(c)
+	})
+}
+
+func redisRateLimiter(config RateLimitConfig, identifier func(*gin.Context) string) gin.HandlerFunc {
+	windowMillis := config.Window.Milliseconds()
+	if windowMillis < 1 {
+		windowMillis = 1
+	}
+
 	return func(c *gin.Context) {
-		// Get client identifier (IP or user ID)
-		clientID := getClientID(c)
-		key := fmt.Sprintf("%s:%s", config.KeyPrefix, clientID)
-
-		ctx := context.Background()
-
-		// Get current count
-		count, err := config.RedisClient.Get(ctx, key).Int()
-		if err != nil && err != redis.Nil {
-			// Redis error - fail open (allow request)
-			c.Next()
+		key := fmt.Sprintf("%s:%s", config.KeyPrefix, identifier(c))
+		result, err := fixedWindowScript.Run(
+			c.Request.Context(),
+			config.RedisClient,
+			[]string{key},
+			windowMillis,
+		).Result()
+		if err != nil {
+			if config.FailOpen {
+				c.Next()
+				return
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "rate_limit_unavailable",
+				"message": "Request protection is temporarily unavailable. Please try again later.",
+			})
+			c.Abort()
 			return
 		}
 
-		// Check if limit exceeded
-		if count >= config.Limit {
-			// Get TTL to inform client when to retry
-			ttl, _ := config.RedisClient.TTL(ctx, key).Result() //nolint:errcheck // TTL error is non-critical
+		count, ttl, err := parseRateLimitResult(result, config.Window)
+		if err != nil {
+			if config.FailOpen {
+				c.Next()
+				return
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "rate_limit_unavailable",
+				"message": "Request protection is temporarily unavailable. Please try again later.",
+			})
+			c.Abort()
+			return
+		}
 
-			c.Header("X-RateLimit-Limit", strconv.Itoa(config.Limit))
-			c.Header("X-RateLimit-Remaining", "0")
-			c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(ttl).Unix(), 10))
-			c.Header("Retry-After", strconv.Itoa(int(ttl.Seconds())))
+		remaining := config.Limit - int(count)
+		if remaining < 0 {
+			remaining = 0
+		}
+		c.Header("X-RateLimit-Limit", strconv.Itoa(config.Limit))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(ttl).Unix(), 10))
 
+		if count > int64(config.Limit) {
+			retryAfter := int(math.Ceil(ttl.Seconds()))
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error":   "rate_limit_exceeded",
 				"message": "Too many requests. Please try again later.",
 				"details": gin.H{
 					"limit":       config.Limit,
 					"window":      config.Window.String(),
-					"retry_after": int(ttl.Seconds()),
+					"retry_after": retryAfter,
 				},
 			})
 			c.Abort()
 			return
 		}
 
-		// Increment counter
-		pipe := config.RedisClient.Pipeline()
-		incr := pipe.Incr(ctx, key)
-		pipe.Expire(ctx, key, config.Window)
-		_, err = pipe.Exec(ctx)
-
-		if err != nil {
-			// Redis error - fail open (allow request)
-			c.Next()
-			return
-		}
-
-		newCount := int(incr.Val())
-		remaining := config.Limit - newCount
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		// Set rate limit headers
-		c.Header("X-RateLimit-Limit", strconv.Itoa(config.Limit))
-		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
-		c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(config.Window).Unix(), 10))
-
 		c.Next()
 	}
 }
 
-// getClientID extracts a unique identifier for the client
+func parseRateLimitResult(result interface{}, fallbackWindow time.Duration) (int64, time.Duration, error) {
+	values, ok := result.([]interface{})
+	if !ok || len(values) != 2 {
+		return 0, 0, fmt.Errorf("unexpected Redis rate-limit result")
+	}
+
+	count, err := redisInt64(values[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid Redis rate-limit count: %w", err)
+	}
+	ttlMillis, err := redisInt64(values[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid Redis rate-limit TTL: %w", err)
+	}
+
+	ttl := time.Duration(ttlMillis) * time.Millisecond
+	if ttlMillis <= 0 || ttl <= 0 {
+		ttl = fallbackWindow
+	}
+
+	return count, ttl, nil
+}
+
+func redisInt64(value interface{}) (int64, error) {
+	switch value := value.(type) {
+	case int64:
+		return value, nil
+	case int:
+		return int64(value), nil
+	case string:
+		return strconv.ParseInt(value, 10, 64)
+	case []byte:
+		return strconv.ParseInt(string(value), 10, 64)
+	default:
+		return 0, fmt.Errorf("unexpected value type %T", value)
+	}
+}
+
+func passThrough() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+	}
+}
+
+// getClientID extracts a stable identifier for the client.
 func getClientID(c *gin.Context) string {
-	// First, try to get user ID from context (if authenticated)
 	if userID, exists := c.Get("user_id"); exists {
 		return fmt.Sprintf("user:%v", userID)
 	}
 
-	// Fall back to IP address
-	clientIP := c.ClientIP()
-	return fmt.Sprintf("ip:%s", clientIP)
+	return fmt.Sprintf("ip:%s", c.ClientIP())
 }
 
-// PerUserRateLimiter creates a rate limiter that only applies to authenticated users
+// PerUserRateLimiter creates a rate limiter that only applies to authenticated users.
 func PerUserRateLimiter(config RateLimitConfig) gin.HandlerFunc {
 	config.KeyPrefix = "ratelimit:user"
 	limiter := RateLimiter(config)
 
 	return func(c *gin.Context) {
-		// Only apply rate limiting if user is authenticated
 		if _, exists := c.Get("user_id"); exists {
 			limiter(c)
-		} else {
-			c.Next()
+			return
 		}
+		c.Next()
 	}
 }
 
-// GlobalRateLimiter creates a global rate limiter for all requests
+// GlobalRateLimiter creates a rate limiter for all requests using one Redis key.
 func GlobalRateLimiter(config RateLimitConfig) gin.HandlerFunc {
 	config.KeyPrefix = "ratelimit:global"
-
-	return func(c *gin.Context) {
-		// Use a fixed key for global rate limiting
-		key := fmt.Sprintf("%s:all", config.KeyPrefix)
-		ctx := context.Background()
-
-		count, err := config.RedisClient.Get(ctx, key).Int()
-		if err != nil && err != redis.Nil {
-			c.Next()
-			return
-		}
-
-		if count >= config.Limit {
-			ttl, _ := config.RedisClient.TTL(ctx, key).Result() //nolint:errcheck // TTL error is non-critical
-
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error":   "rate_limit_exceeded",
-				"message": "Global rate limit exceeded. Please try again later.",
-				"details": gin.H{
-					"limit":       config.Limit,
-					"window":      config.Window.String(),
-					"retry_after": int(ttl.Seconds()),
-				},
-			})
-			c.Abort()
-			return
-		}
-
-		pipe := config.RedisClient.Pipeline()
-		pipe.Incr(ctx, key)
-		pipe.Expire(ctx, key, config.Window)
-		//nolint:errcheck // Pipeline errors are handled earlier
-		_, _ = pipe.Exec(ctx)
-
-		c.Next()
+	if config.RedisClient == nil || config.Limit <= 0 || config.Window <= 0 {
+		return passThrough()
 	}
+	return redisRateLimiter(config, func(*gin.Context) string {
+		return "all"
+	})
 }

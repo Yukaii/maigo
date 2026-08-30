@@ -28,6 +28,15 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
 
     steps:
     - name: Checkout code
@@ -73,6 +82,11 @@ jobs:
     - name: Run unit tests
       run: go test -v -race -short ./internal/...
 
+    - name: Run Redis limiter tests
+      env:
+        MAIGO_TEST_REDIS_URL: redis://localhost:6379/15
+      run: go test -v ./internal/server/middleware -run TestRateLimiter_RedisAtomic
+
     - name: Set up test environment
       env:
         PGPASSWORD: password
@@ -86,7 +100,7 @@ jobs:
 
     - name: Run integration tests
       env:
-        CONFIG_PATH: config/test.yaml
+        CONFIG_PATH: ${{ github.workspace }}/config/test.yaml
         DB_HOST: localhost
         DB_PORT: 5432
         DB_NAME: maigo_test
@@ -97,7 +111,7 @@ jobs:
 
     - name: Generate coverage report
       env:
-        CONFIG_PATH: config/test.yaml
+        CONFIG_PATH: ${{ github.workspace }}/config/test.yaml
         DB_HOST: localhost
         DB_PORT: 5432
         DB_NAME: maigo_test

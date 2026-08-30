@@ -48,11 +48,11 @@ CLI/API use. It is not yet a production-ready hosted service.
 
 - The statistics `timeline` is currently one aggregate point derived from the
   URL total; there is no click-event or daily analytics table yet.
-- The rate limiter is process-local and global to URL creation. It is not
-  shared across replicas and should be complemented by an edge/API gateway.
-- An older Redis-backed limiter remains as unconnected middleware with
-  fail-open/no-Redis tests; the running server uses the in-process limiter in
-  `internal/server/middleware/rate_limit.go`.
+- Redis-backed rate limiting is now available for the running server. It uses
+  an atomic fixed-window script and fail-closed behavior by default when
+  enabled. With Redis disabled, the fallback is a bounded per-client
+  in-process limiter and is not shared across replicas. Forwarded client-IP
+  headers are ignored unless explicitly allowed by `TRUSTED_PROXIES`.
 - The current `sessions` schema permits one active refresh session per user.
   Multi-device sessions would need a migration and a session-management model.
 - Access JWTs are stateless. Logout immediately revokes refresh sessions, but
@@ -60,26 +60,26 @@ CLI/API use. It is not yet a production-ready hosted service.
 - Hit increments are asynchronous; a process shutdown immediately after a
   redirect can lose the last increment.
 - Development may use wildcard CORS when `DEBUG=true`; non-debug deployments
-  require explicit origins, and `APP_ENV=production` rejects placeholder or
-  short JWT secrets. The default deployment still assumes a reverse proxy will
-  provide HTTPS. These are deliberate prototype defaults, not a full security
-  baseline.
+  require explicit origins, and `APP_ENV=production` rejects placeholder
+  database, Redis, or short/known JWT secrets. The default deployment still
+  assumes a reverse proxy will provide HTTPS. These are deliberate prototype
+  defaults, not a full security baseline.
 - There is no cleanup job for expired URLs, authorization codes, or old access
   token records.
 
 ## Recommended next work
 
 1. Add a stored click-event table and real time-bucketed statistics.
-2. Replace the process-local limiter with Redis or an edge limiter and add
-   per-user/IP policy tests.
+2. Make Redis or an equivalent edge limiter part of the required topology for
+   horizontally scaled deployments, and add per-user/IP policy tests.
 3. Add key rotation/JWK or another managed signing-key strategy before
    issuing tokens outside a single trusted deployment.
 4. Decide whether multiple devices are supported, then migrate sessions away
    from the one-row-per-user constraint.
 5. Add HTTP integration coverage for malformed redirects, token algorithms,
    CORS policy, pagination bounds, and all documented error responses.
-6. Add OpenAPI validation to CI and either wire or remove the disconnected
-   Redis limiter.
+6. Add OpenAPI validation to CI and add Redis-backed integration coverage to the
+   normal production-like test profile.
 
 ## Running the checks
 

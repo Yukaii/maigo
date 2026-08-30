@@ -68,9 +68,11 @@ type AppConfig struct {
 	Environment     string          `mapstructure:"environment"`
 	BaseDomain      string          `mapstructure:"base_domain"`
 	Domain          string          `mapstructure:"domain"`
+	TrustedProxies  string          `mapstructure:"trusted_proxies"`
 	TLS             bool            `mapstructure:"tls"`
 	ShortCodeLength int             `mapstructure:"short_code_length"`
 	RateLimit       RateLimitConfig `mapstructure:"rate_limit"`
+	AuthRateLimit   RateLimitConfig `mapstructure:"auth_rate_limit"`
 	Debug           bool            `mapstructure:"debug"`
 	CORSEnabled     bool            `mapstructure:"cors_enabled"`
 	CORSOrigins     string          `mapstructure:"cors_origins"`
@@ -95,6 +97,7 @@ type RedisConfig struct {
 	Port     int    `mapstructure:"port"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
+	FailOpen bool   `mapstructure:"fail_open"`
 }
 
 // Load loads configuration from various sources
@@ -186,16 +189,20 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.port", 6379)
 	v.SetDefault("redis.password", "")
 	v.SetDefault("redis.db", 0)
+	v.SetDefault("redis.fail_open", false)
 
 	// App defaults
 	v.SetDefault("app.name", "Maigo")
 	v.SetDefault("app.environment", "development")
 	v.SetDefault("app.base_domain", "maigo.dev")
 	v.SetDefault("app.domain", "maigo.dev")
+	v.SetDefault("app.trusted_proxies", "")
 	v.SetDefault("app.tls", false)
 	v.SetDefault("app.short_code_length", 6)
 	v.SetDefault("app.rate_limit.requests", 100)
 	v.SetDefault("app.rate_limit.window", "1h")
+	v.SetDefault("app.auth_rate_limit.requests", 20)
+	v.SetDefault("app.auth_rate_limit.window", "15m")
 	v.SetDefault("app.debug", false)
 	v.SetDefault("app.cors_enabled", false)
 	v.SetDefault("app.cors_origins", "")
@@ -233,16 +240,27 @@ func bindEnvVars(v *viper.Viper) {
 		"JWT_SECRET":     "jwt.secret",
 		"JWT_EXPIRATION": "jwt.expiration",
 
+		// Redis configuration
+		"REDIS_ENABLED":   "redis.enabled",
+		"REDIS_HOST":      "redis.host",
+		"REDIS_PORT":      "redis.port",
+		"REDIS_PASSWORD":  "redis.password",
+		"REDIS_DB":        "redis.db",
+		"REDIS_FAIL_OPEN": "redis.fail_open",
+
 		// Application configuration
-		"APP_ENV":             "app.environment",
-		"BASE_DOMAIN":         "app.base_domain",
-		"APP_TLS":             "app.tls",
-		"SHORT_CODE_LENGTH":   "app.short_code_length",
-		"RATE_LIMIT_REQUESTS": "app.rate_limit.requests",
-		"RATE_LIMIT_WINDOW":   "app.rate_limit.window",
-		"DEBUG":               "app.debug",
-		"CORS_ENABLED":        "app.cors_enabled",
-		"CORS_ORIGINS":        "app.cors_origins",
+		"APP_ENV":                  "app.environment",
+		"BASE_DOMAIN":              "app.base_domain",
+		"TRUSTED_PROXIES":          "app.trusted_proxies",
+		"APP_TLS":                  "app.tls",
+		"SHORT_CODE_LENGTH":        "app.short_code_length",
+		"RATE_LIMIT_REQUESTS":      "app.rate_limit.requests",
+		"RATE_LIMIT_WINDOW":        "app.rate_limit.window",
+		"AUTH_RATE_LIMIT_REQUESTS": "app.auth_rate_limit.requests",
+		"AUTH_RATE_LIMIT_WINDOW":   "app.auth_rate_limit.window",
+		"DEBUG":                    "app.debug",
+		"CORS_ENABLED":             "app.cors_enabled",
+		"CORS_ORIGINS":             "app.cors_origins",
 
 		// Logging configuration
 		"LOG_LEVEL":  "log.level",
@@ -290,9 +308,33 @@ func validateConfig(cfg *Config) error {
 		if isPlaceholderJWTSecret(cfg.JWT.Secret) {
 			return fmt.Errorf("jwt secret must be replaced with a unique secret in production")
 		}
+		if isPlaceholderDatabasePassword(databasePasswordForValidation(cfg)) {
+			return fmt.Errorf("database password must be replaced with a unique secret in production")
+		}
+		if cfg.Redis.Enabled && isPlaceholderRedisPassword(cfg.Redis.Password) {
+			return fmt.Errorf("redis password must be replaced with a unique secret in production")
+		}
 	}
 	if cfg.App.BaseDomain == "" {
 		return fmt.Errorf("base domain is required")
+	}
+	for _, proxy := range cfg.App.TrustedProxyList() {
+		if net.ParseIP(proxy) == nil {
+			if _, _, err := net.ParseCIDR(proxy); err != nil {
+				return fmt.Errorf("invalid trusted proxy %q: expected an IP address or CIDR", proxy)
+			}
+		}
+	}
+	if cfg.Redis.Enabled {
+		if cfg.Redis.Host == "" {
+			return fmt.Errorf("redis host is required when Redis is enabled")
+		}
+		if cfg.Redis.Port < 1 || cfg.Redis.Port > 65535 {
+			return fmt.Errorf("redis port must be between 1 and 65535")
+		}
+		if cfg.Redis.DB < 0 {
+			return fmt.Errorf("redis database number cannot be negative")
+		}
 	}
 	if cfg.App.CORSEnabled {
 		origins := cfg.App.AllowedCORSOrigins()
@@ -330,11 +372,55 @@ func (c AppConfig) AllowedCORSOrigins() []string {
 	return origins
 }
 
+// TrustedProxyList returns the configured proxy IPs or CIDR ranges. An empty
+// list intentionally disables forwarded-client-IP trust.
+func (c AppConfig) TrustedProxyList() []string {
+	var proxies []string
+	for _, proxy := range strings.Split(c.TrustedProxies, ",") {
+		proxy = strings.TrimSpace(proxy)
+		if proxy != "" {
+			proxies = append(proxies, proxy)
+		}
+	}
+
+	return proxies
+}
+
 func isPlaceholderJWTSecret(secret string) bool {
 	switch strings.TrimSpace(strings.ToLower(secret)) {
 	case "dev_jwt_secret_change_in_production",
 		"change-this-in-production",
 		"your-secure-jwt-secret-minimum-32-characters":
+		return true
+	default:
+		return false
+	}
+}
+
+func databasePasswordForValidation(cfg *Config) string {
+	if cfg.Database.URL != "" {
+		if parsedURL, err := url.Parse(cfg.Database.URL); err == nil && parsedURL.User != nil {
+			if password, ok := parsedURL.User.Password(); ok {
+				return password
+			}
+		}
+	}
+
+	return cfg.Database.Password
+}
+
+func isPlaceholderDatabasePassword(password string) bool {
+	switch strings.TrimSpace(strings.ToLower(password)) {
+	case "password", "maigo_secret", "your-secure-database-password-here":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPlaceholderRedisPassword(password string) bool {
+	switch strings.TrimSpace(strings.ToLower(password)) {
+	case "redis_secret", "your-secure-redis-password":
 		return true
 	default:
 		return false

@@ -63,7 +63,17 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
       RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1h}
+      AUTH_RATE_LIMIT_REQUESTS: ${AUTH_RATE_LIMIT_REQUESTS:-20}
+      AUTH_RATE_LIMIT_WINDOW: ${AUTH_RATE_LIMIT_WINDOW:-15m}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-24h}
+
+      # Optional distributed rate limiting
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_FAIL_OPEN: ${REDIS_FAIL_OPEN:-false}
 
       # Short Code Configuration
       SHORT_CODE_LENGTH: ${SHORT_CODE_LENGTH:-6}
@@ -81,18 +91,20 @@ services:
     networks:
       - maigo-network
 
-  # Redis (for future caching/rate limiting)
+  # Optional Redis-backed distributed rate limiting
   redis:
     image: redis:7-alpine
     container_name: maigo-redis
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secret}
     volumes:
       - redis_data:/data
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

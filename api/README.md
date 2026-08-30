@@ -83,7 +83,7 @@ available and includes `expired: true`.
 ## Routes at a glance
 
 - `GET /health` — liveness.
-- `GET /health/ready` — liveness plus PostgreSQL readiness.
+- `GET /health/ready` — liveness plus PostgreSQL and configured Redis readiness.
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login` — JSON auth helpers.
 - `POST /api/v1/auth/token` — JSON refresh compatibility endpoint.
 - `POST /api/v1/auth/logout` — revoke the current user’s refresh session.
@@ -94,8 +94,10 @@ available and includes `expired: true`.
 - `GET /api/v1/urls/{code}/stats`, `DELETE /api/v1/urls/{code}` — owner operations.
 - `GET /{code}` — public redirect.
 
-The create endpoint has a process-local global rate limiter. It is not shared
-between replicas and is not a substitute for an edge/API gateway limiter.
+URL creation and authentication endpoints are rate limited. With
+`REDIS_ENABLED=true`, limits use an atomic Redis-backed fixed window and are
+shared across replicas; otherwise a bounded per-client in-process limiter is
+used. The in-process mode is not a substitute for an edge/API gateway limiter.
 
 ## Error shape
 
@@ -111,6 +113,10 @@ JSON API errors use:
 
 OAuth token errors use the same envelope at the HTTP layer, with the OAuth
 error code in `error` (for example, `invalid_grant`).
+
+Authentication and URL-creation endpoints may return `429 rate_limit_exceeded`.
+When Redis-backed limiting is enabled and Redis is unavailable, the protected
+endpoint returns `503 rate_limit_unavailable` instead of bypassing the limit.
 
 ## Viewing the OpenAPI file
 
@@ -128,8 +134,8 @@ Then visit <http://localhost:8081>.
 ## Current limitations
 
 The statistics timeline is currently an aggregate point, not a stored
-time-series. Rate limiting is in-memory. Configure HTTPS and a real secret
-manager for any deployment beyond local development. See
+time-series. Configure HTTPS, Redis or an edge limiter for horizontal scale,
+and a real secret manager for any deployment beyond local development. See
 [`docs/STATUS.md`](../docs/STATUS.md) for the fuller audit and next steps.
 
 ## License

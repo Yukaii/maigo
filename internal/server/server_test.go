@@ -4,12 +4,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/server/middleware"
 )
 
 func TestHTTPServerCORSUsesConfiguredOrigins(t *testing.T) {
@@ -58,4 +61,52 @@ func TestHTTPServerCORSAllowsWildcardOnlyInDebug(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	assert.Equal(t, "*", response.Header().Get("Access-Control-Allow-Origin"))
 	assert.Empty(t, response.Header().Get("Access-Control-Allow-Credentials"))
+}
+
+func TestHTTPServerDoesNotTrustForwardedIPByDefault(t *testing.T) {
+	log := logger.NewLogger(logger.Config{Level: "error", Format: "text"})
+	cfg := &config.Config{
+		App: config.AppConfig{
+			RateLimit: config.RateLimitConfig{Requests: 1, Window: time.Hour},
+		},
+	}
+	server := NewHTTPServer(cfg, nil, log)
+	server.engine.GET("/proxy-test/limit", middleware.RateLimit(cfg.App.RateLimit), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	first := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.1")
+	second := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.2")
+
+	assert.Equal(t, http.StatusOK, first.Code)
+	assert.Equal(t, http.StatusTooManyRequests, second.Code)
+}
+
+func TestHTTPServerUsesConfiguredTrustedProxy(t *testing.T) {
+	log := logger.NewLogger(logger.Config{Level: "error", Format: "text"})
+	cfg := &config.Config{
+		App: config.AppConfig{
+			TrustedProxies: "10.0.0.0/8",
+			RateLimit:      config.RateLimitConfig{Requests: 1, Window: time.Hour},
+		},
+	}
+	server := NewHTTPServer(cfg, nil, log)
+	server.engine.GET("/proxy-test/limit", middleware.RateLimit(cfg.App.RateLimit), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	first := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.1")
+	second := serveProxyTestRequest(server, "10.0.0.1:1000", "198.51.100.2")
+
+	assert.Equal(t, http.StatusOK, first.Code)
+	assert.Equal(t, http.StatusOK, second.Code)
+}
+
+func serveProxyTestRequest(server *HTTPServer, remoteAddr, forwardedFor string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, "/proxy-test/limit", nil)
+	request.RemoteAddr = remoteAddr
+	request.Header.Set("X-Forwarded-For", forwardedFor)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	return response
 }

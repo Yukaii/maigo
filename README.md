@@ -56,6 +56,13 @@ override both.
 Development tools are pinned in [`mise.toml`](mise.toml): Go, Air,
 golangci-lint, migrate, GoReleaser, and goimports.
 
+`APP_ENV=production` enables fail-fast checks for deployment-safe secrets and
+debug settings. CORS origins are configured with the comma-separated
+`CORS_ORIGINS` variable. Set `REDIS_ENABLED=true` to use the atomic distributed
+rate limiter; when Redis is disabled, the server uses a bounded per-client
+in-process limiter. Forwarded client-IP headers are ignored unless their proxy
+network is listed in `TRUSTED_PROXIES`.
+
 ## HTTP API
 
 Health:

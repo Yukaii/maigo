@@ -360,6 +360,25 @@ func TestValidateConfigProductionSecuritySettings(t *testing.T) {
 			},
 			errorContains: "unique secret",
 		},
+		{
+			name: "rejects placeholder database password",
+			mutate: func(cfg *Config) {
+				cfg.Database.URL = "postgres://user:your-secure-database-password-here@host:5432/db"
+			},
+			errorContains: "database password",
+		},
+		{
+			name: "rejects placeholder Redis password",
+			mutate: func(cfg *Config) {
+				cfg.Redis = RedisConfig{
+					Enabled:  true,
+					Host:     "redis.example",
+					Port:     6379,
+					Password: "your-secure-redis-password",
+				}
+			},
+			errorContains: "redis password",
+		},
 	}
 
 	for _, tt := range tests {
@@ -455,10 +474,83 @@ func TestAppConfigAllowedCORSOrigins(t *testing.T) {
 	assert.Equal(t, []string{"https://one.example", "https://two.example"}, cfg.AllowedCORSOrigins())
 }
 
+func TestAppConfigTrustedProxyList(t *testing.T) {
+	cfg := AppConfig{TrustedProxies: " 10.0.0.0/8, , 192.0.2.10 "}
+	assert.Equal(t, []string{"10.0.0.0/8", "192.0.2.10"}, cfg.TrustedProxyList())
+}
+
+func TestValidateConfigRedisSettings(t *testing.T) {
+	baseConfig := Config{
+		Database: DatabaseConfig{URL: "postgres://user:pass@host:5432/db"},
+		OAuth2:   OAuth2Config{ClientID: "client-id", ClientSecret: "client-secret"},
+		JWT:      JWTConfig{Secret: "jwt-secret"},
+		App:      AppConfig{BaseDomain: "example.com", ShortCodeLength: 6},
+	}
+
+	tests := []struct {
+		name          string
+		redis         RedisConfig
+		errorContains string
+	}{
+		{
+			name: "accepts a valid Redis configuration",
+			redis: RedisConfig{
+				Enabled: true,
+				Host:    "redis.example",
+				Port:    6379,
+				DB:      1,
+			},
+		},
+		{
+			name: "requires a Redis host",
+			redis: RedisConfig{
+				Enabled: true,
+				Port:    6379,
+			},
+			errorContains: "redis host is required",
+		},
+		{
+			name: "rejects an invalid Redis port",
+			redis: RedisConfig{
+				Enabled: true,
+				Host:    "redis.example",
+				Port:    65536,
+			},
+			errorContains: "redis port must be between",
+		},
+		{
+			name: "rejects a negative Redis database number",
+			redis: RedisConfig{
+				Enabled: true,
+				Host:    "redis.example",
+				Port:    6379,
+				DB:      -1,
+			},
+			errorContains: "cannot be negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig
+			cfg.Redis = tt.redis
+
+			err := validateConfig(&cfg)
+			if tt.errorContains == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorContains)
+		})
+	}
+}
+
 func TestLoadWithEnvVars(t *testing.T) {
 	// Save original env vars
 	originalVars := make(map[string]string)
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "CORS_ENABLED", "CORS_ORIGINS", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
@@ -491,9 +583,27 @@ func TestLoadWithEnvVars(t *testing.T) {
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("APP_ENV", "test")
 	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("TRUSTED_PROXIES", "10.0.0.0/8")
+	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("CORS_ENABLED", "true")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("CORS_ORIGINS", "http://localhost:3000")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("AUTH_RATE_LIMIT_REQUESTS", "7")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("AUTH_RATE_LIMIT_WINDOW", "5m")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("REDIS_ENABLED", "true")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("REDIS_HOST", "redis.example")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("REDIS_PORT", "6380")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("REDIS_PASSWORD", "redis-pass")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("REDIS_DB", "2")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("REDIS_FAIL_OPEN", "true")
 
 	// Load config - this should pick up environment variables
 	config, err := Load()
@@ -505,7 +615,16 @@ func TestLoadWithEnvVars(t *testing.T) {
 	assert.Equal(t, "env-jwt-secret", config.JWT.Secret)
 	assert.True(t, config.App.Debug)
 	assert.Equal(t, "test", config.App.Environment)
+	assert.Equal(t, "10.0.0.0/8", config.App.TrustedProxies)
 	assert.Equal(t, "http://localhost:3000", config.App.CORSOrigins)
+	assert.Equal(t, 7, config.App.AuthRateLimit.Requests)
+	assert.Equal(t, 5*time.Minute, config.App.AuthRateLimit.Window)
+	assert.True(t, config.Redis.Enabled)
+	assert.Equal(t, "redis.example", config.Redis.Host)
+	assert.Equal(t, 6380, config.Redis.Port)
+	assert.Equal(t, "redis-pass", config.Redis.Password)
+	assert.Equal(t, 2, config.Redis.DB)
+	assert.True(t, config.Redis.FailOpen)
 
 	// Note: DATABASE_URL parsing only fills empty fields, so we test the DatabaseURL() method instead
 	expectedURL := "postgres://envuser:envpass@envhost:5433/envdb?sslmode=require"
@@ -514,7 +633,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear environment variables that might interfere
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "CORS_ENABLED", "CORS_ORIGINS", "DB_HOST"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "DB_HOST"}
 	originalVars := make(map[string]string)
 
 	for _, envVar := range envVars {
@@ -555,13 +674,20 @@ func TestLoadDefaults(t *testing.T) {
 
 	assert.Equal(t, "Maigo", config.App.Name)
 	assert.Equal(t, "development", config.App.Environment)
+	assert.Empty(t, config.App.TrustedProxies)
 	assert.Equal(t, "maigo.dev", config.App.BaseDomain)
 	assert.Equal(t, 6, config.App.ShortCodeLength)
 	assert.Equal(t, 100, config.App.RateLimit.Requests)
 	assert.Equal(t, 1*time.Hour, config.App.RateLimit.Window)
+	assert.Equal(t, 20, config.App.AuthRateLimit.Requests)
+	assert.Equal(t, 15*time.Minute, config.App.AuthRateLimit.Window)
 	assert.False(t, config.App.Debug)
 	assert.False(t, config.App.CORSEnabled)
 	assert.Empty(t, config.App.CORSOrigins)
+	assert.False(t, config.Redis.Enabled)
+	assert.Equal(t, "localhost", config.Redis.Host)
+	assert.Equal(t, 6379, config.Redis.Port)
+	assert.False(t, config.Redis.FailOpen)
 
 	assert.Equal(t, "info", config.Log.Level)
 	assert.Equal(t, "json", config.Log.Format)

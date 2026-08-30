@@ -10,6 +10,8 @@ All notable changes to Maigo will be documented here. The format follows
 
 - Added explicit CORS origin configuration with debug-only wildcard behavior.
 - Added production-mode validation for debug settings and JWT placeholders.
+- Wired Redis into server startup and added atomic distributed rate limiting
+  with auth-endpoint protection and a bounded in-process fallback.
 
 ### Added
 

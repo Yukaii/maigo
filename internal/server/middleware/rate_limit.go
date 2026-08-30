@@ -3,6 +3,8 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,11 @@ import (
 
 	"github.com/yukaii/maigo/internal/config"
 )
+
+type localRateLimitVisitor struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
 
 // RateLimit creates a rate limiting middleware
 func RateLimit(rateLimitConfig config.RateLimitConfig) gin.HandlerFunc {
@@ -21,17 +28,44 @@ func RateLimit(rateLimitConfig config.RateLimitConfig) gin.HandlerFunc {
 		}
 	}
 
-	// Create a rate limiter
-	// This is a simple global rate limiter - in production you'd want per-IP limiting
-	limiter := rate.NewLimiter(
-		rate.Every(rateLimitConfig.Window/time.Duration(rateLimitConfig.Requests)),
-		rateLimitConfig.Requests,
-	)
+	interval := rateLimitConfig.Window / time.Duration(rateLimitConfig.Requests)
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+
+	// Keep a bounded per-client store. A single global bucket lets one caller
+	// starve every other caller, while an unbounded map would be an easy memory
+	// exhaustion target.
+	const maxVisitors = 10_000
+	visitors := make(map[string]*localRateLimitVisitor)
+	var visitorsMu sync.Mutex
 
 	return func(c *gin.Context) {
-		if !limiter.Allow() {
+		clientID := getClientID(c)
+		now := time.Now()
+
+		visitorsMu.Lock()
+		v, exists := visitors[clientID]
+		if !exists {
+			if len(visitors) >= maxVisitors {
+				evictOldestVisitor(visitors)
+			}
+			v = &localRateLimitVisitor{
+				limiter: rate.NewLimiter(
+					rate.Every(interval),
+					rateLimitConfig.Requests,
+				),
+			}
+			visitors[clientID] = v
+		}
+		v.lastSeen = now
+		allowed := v.limiter.Allow()
+		visitorsMu.Unlock()
+
+		if !allowed {
+			c.Header("X-RateLimit-Limit", strconv.Itoa(rateLimitConfig.Requests))
 			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error":   "Rate Limit Exceeded",
+				"error":   "rate_limit_exceeded",
 				"message": "Too many requests. Please try again later.",
 			})
 			c.Abort()
@@ -39,5 +73,19 @@ func RateLimit(rateLimitConfig config.RateLimitConfig) gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+func evictOldestVisitor(visitors map[string]*localRateLimitVisitor) {
+	var oldestKey string
+	var oldest time.Time
+	for key, visitor := range visitors {
+		if oldestKey == "" || visitor.lastSeen.Before(oldest) {
+			oldestKey = key
+			oldest = visitor.lastSeen
+		}
+	}
+	if oldestKey != "" {
+		delete(visitors, oldestKey)
 	}
 }

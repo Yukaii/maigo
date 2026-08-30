@@ -8,6 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/yukaii/maigo/internal/config"
 )
 
 func TestRateLimiter_NoRedis(t *testing.T) {
@@ -37,6 +39,32 @@ func TestRateLimiter_NoRedis(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code, "Request %d should succeed without Redis", i)
 	}
+}
+
+func TestRateLimit_IsPerClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(RateLimit(config.RateLimitConfig{
+		Requests: 2,
+		Window:   time.Hour,
+	}))
+	router.GET("/test", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	request := func(remoteAddr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
+		req.RemoteAddr = remoteAddr
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	assert.Equal(t, http.StatusOK, request("192.0.2.1:1000").Code)
+	assert.Equal(t, http.StatusOK, request("192.0.2.1:1000").Code)
+	assert.Equal(t, http.StatusTooManyRequests, request("192.0.2.1:1000").Code)
+	assert.Equal(t, http.StatusOK, request("192.0.2.2:1000").Code)
 }
 
 func TestGetClientID(t *testing.T) {
@@ -101,6 +129,22 @@ func TestRateLimitConfig_Defaults(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGlobalRateLimiter_NoRedis(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(GlobalRateLimiter(RateLimitConfig{Limit: 1, Window: time.Minute}))
+	router.GET("/test", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code)
 }
 
 func TestPerUserRateLimiter_NoAuth(t *testing.T) {
