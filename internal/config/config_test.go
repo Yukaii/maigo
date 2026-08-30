@@ -318,10 +318,147 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
+func TestValidateConfigProductionSecuritySettings(t *testing.T) {
+	baseConfig := Config{
+		Database: DatabaseConfig{URL: "postgres://user:pass@host:5432/db"},
+		OAuth2:   OAuth2Config{ClientID: "client-id", ClientSecret: "client-secret"},
+		JWT:      JWTConfig{Secret: "a-unique-production-secret-that-is-long-enough"},
+		App: AppConfig{
+			Environment:     "production",
+			BaseDomain:      "short.example.com",
+			ShortCodeLength: 6,
+			CORSOrigins:     "https://console.example.com",
+		},
+	}
+
+	tests := []struct {
+		name          string
+		mutate        func(*Config)
+		errorContains string
+	}{
+		{
+			name: "accepts a strong unique secret",
+		},
+		{
+			name: "rejects debug mode",
+			mutate: func(cfg *Config) {
+				cfg.App.Debug = true
+			},
+			errorContains: "debug must be disabled",
+		},
+		{
+			name: "rejects short secret",
+			mutate: func(cfg *Config) {
+				cfg.JWT.Secret = "short-secret"
+			},
+			errorContains: "at least 32 bytes",
+		},
+		{
+			name: "rejects documented placeholder",
+			mutate: func(cfg *Config) {
+				cfg.JWT.Secret = "your-secure-jwt-secret-minimum-32-characters"
+			},
+			errorContains: "unique secret",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig
+			if tt.mutate != nil {
+				tt.mutate(&cfg)
+			}
+
+			err := validateConfig(&cfg)
+			if tt.errorContains == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorContains)
+		})
+	}
+}
+
+func TestValidateConfigCORS(t *testing.T) {
+	baseConfig := Config{
+		Database: DatabaseConfig{URL: "postgres://user:pass@host:5432/db"},
+		OAuth2:   OAuth2Config{ClientID: "client-id", ClientSecret: "client-secret"},
+		JWT:      JWTConfig{Secret: "jwt-secret"},
+		App: AppConfig{
+			BaseDomain:      "example.com",
+			ShortCodeLength: 6,
+			CORSEnabled:     true,
+		},
+	}
+
+	tests := []struct {
+		name          string
+		mutate        func(*Config)
+		errorContains string
+	}{
+		{
+			name: "debug mode may use the wildcard",
+			mutate: func(cfg *Config) {
+				cfg.App.Debug = true
+				cfg.App.CORSOrigins = "*"
+			},
+		},
+		{
+			name:          "requires origins outside debug mode",
+			errorContains: "cors origins are required",
+		},
+		{
+			name: "rejects wildcard outside debug mode",
+			mutate: func(cfg *Config) {
+				cfg.App.CORSOrigins = "*"
+			},
+			errorContains: "wildcard CORS origin",
+		},
+		{
+			name: "rejects a path in an origin",
+			mutate: func(cfg *Config) {
+				cfg.App.CORSOrigins = "https://console.example.com/app"
+			},
+			errorContains: "invalid CORS origin",
+		},
+		{
+			name: "accepts comma separated origins",
+			mutate: func(cfg *Config) {
+				cfg.App.CORSOrigins = "https://console.example.com, https://admin.example.com"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig
+			if tt.mutate != nil {
+				tt.mutate(&cfg)
+			}
+
+			err := validateConfig(&cfg)
+			if tt.errorContains == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorContains)
+		})
+	}
+}
+
+func TestAppConfigAllowedCORSOrigins(t *testing.T) {
+	cfg := AppConfig{CORSOrigins: " https://one.example, ,https://two.example "}
+	assert.Equal(t, []string{"https://one.example", "https://two.example"}, cfg.AllowedCORSOrigins())
+}
+
 func TestLoadWithEnvVars(t *testing.T) {
 	// Save original env vars
 	originalVars := make(map[string]string)
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "CORS_ENABLED", "CORS_ORIGINS", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
@@ -351,6 +488,12 @@ func TestLoadWithEnvVars(t *testing.T) {
 	os.Setenv("JWT_SECRET", "env-jwt-secret")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("DEBUG", "true")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("APP_ENV", "test")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("CORS_ENABLED", "true")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("CORS_ORIGINS", "http://localhost:3000")
 
 	// Load config - this should pick up environment variables
 	config, err := Load()
@@ -361,6 +504,8 @@ func TestLoadWithEnvVars(t *testing.T) {
 	assert.Equal(t, 9090, config.Server.Port)
 	assert.Equal(t, "env-jwt-secret", config.JWT.Secret)
 	assert.True(t, config.App.Debug)
+	assert.Equal(t, "test", config.App.Environment)
+	assert.Equal(t, "http://localhost:3000", config.App.CORSOrigins)
 
 	// Note: DATABASE_URL parsing only fills empty fields, so we test the DatabaseURL() method instead
 	expectedURL := "postgres://envuser:envpass@envhost:5433/envdb?sslmode=require"
@@ -369,7 +514,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear environment variables that might interfere
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "DB_HOST"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "CORS_ENABLED", "CORS_ORIGINS", "DB_HOST"}
 	originalVars := make(map[string]string)
 
 	for _, envVar := range envVars {
@@ -409,12 +554,14 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, 24*time.Hour, config.JWT.Expiration)
 
 	assert.Equal(t, "Maigo", config.App.Name)
+	assert.Equal(t, "development", config.App.Environment)
 	assert.Equal(t, "maigo.dev", config.App.BaseDomain)
 	assert.Equal(t, 6, config.App.ShortCodeLength)
 	assert.Equal(t, 100, config.App.RateLimit.Requests)
 	assert.Equal(t, 1*time.Hour, config.App.RateLimit.Window)
 	assert.False(t, config.App.Debug)
-	assert.True(t, config.App.CORSEnabled)
+	assert.False(t, config.App.CORSEnabled)
+	assert.Empty(t, config.App.CORSOrigins)
 
 	assert.Equal(t, "info", config.Log.Level)
 	assert.Equal(t, "json", config.Log.Format)

@@ -59,9 +59,11 @@ CLI/API use. It is not yet a production-ready hosted service.
   an already-issued access token remains valid until its configured expiry.
 - Hit increments are asynchronous; a process shutdown immediately after a
   redirect can lose the last increment.
-- CORS defaults to `*`, development secrets are present in templates, and the
-  default deployment assumes a reverse proxy will provide HTTPS. These are
-  deliberate prototype defaults, not a security baseline.
+- Development may use wildcard CORS when `DEBUG=true`; non-debug deployments
+  require explicit origins, and `APP_ENV=production` rejects placeholder or
+  short JWT secrets. The default deployment still assumes a reverse proxy will
+  provide HTTPS. These are deliberate prototype defaults, not a full security
+  baseline.
 - There is no cleanup job for expired URLs, authorization codes, or old access
   token records.
 

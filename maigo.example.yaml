@@ -38,11 +38,13 @@ jwt:
 
 # Application Configuration
 app:
+  environment: development
   base_domain: maigo.dev
   tls: false
   short_code_length: 6
   debug: true
   cors_enabled: true
+  cors_origins: ""
   rate_limit:
     requests: 100
     window: 1h

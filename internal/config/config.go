@@ -65,6 +65,7 @@ type JWTConfig struct {
 // AppConfig holds application-specific configuration
 type AppConfig struct {
 	Name            string          `mapstructure:"name"`
+	Environment     string          `mapstructure:"environment"`
 	BaseDomain      string          `mapstructure:"base_domain"`
 	Domain          string          `mapstructure:"domain"`
 	TLS             bool            `mapstructure:"tls"`
@@ -72,6 +73,7 @@ type AppConfig struct {
 	RateLimit       RateLimitConfig `mapstructure:"rate_limit"`
 	Debug           bool            `mapstructure:"debug"`
 	CORSEnabled     bool            `mapstructure:"cors_enabled"`
+	CORSOrigins     string          `mapstructure:"cors_origins"`
 }
 
 // RateLimitConfig holds rate limiting configuration
@@ -187,6 +189,7 @@ func setDefaults(v *viper.Viper) {
 
 	// App defaults
 	v.SetDefault("app.name", "Maigo")
+	v.SetDefault("app.environment", "development")
 	v.SetDefault("app.base_domain", "maigo.dev")
 	v.SetDefault("app.domain", "maigo.dev")
 	v.SetDefault("app.tls", false)
@@ -194,7 +197,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("app.rate_limit.requests", 100)
 	v.SetDefault("app.rate_limit.window", "1h")
 	v.SetDefault("app.debug", false)
-	v.SetDefault("app.cors_enabled", true)
+	v.SetDefault("app.cors_enabled", false)
+	v.SetDefault("app.cors_origins", "")
 
 	// Log defaults
 	v.SetDefault("log.level", "info")
@@ -230,6 +234,7 @@ func bindEnvVars(v *viper.Viper) {
 		"JWT_EXPIRATION": "jwt.expiration",
 
 		// Application configuration
+		"APP_ENV":             "app.environment",
 		"BASE_DOMAIN":         "app.base_domain",
 		"APP_TLS":             "app.tls",
 		"SHORT_CODE_LENGTH":   "app.short_code_length",
@@ -237,6 +242,7 @@ func bindEnvVars(v *viper.Viper) {
 		"RATE_LIMIT_WINDOW":   "app.rate_limit.window",
 		"DEBUG":               "app.debug",
 		"CORS_ENABLED":        "app.cors_enabled",
+		"CORS_ORIGINS":        "app.cors_origins",
 
 		// Logging configuration
 		"LOG_LEVEL":  "log.level",
@@ -274,11 +280,77 @@ func validateConfig(cfg *Config) error {
 	if cfg.JWT.Secret == "" {
 		return fmt.Errorf("jwt secret is required")
 	}
+	if strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "production") {
+		if cfg.App.Debug {
+			return fmt.Errorf("debug must be disabled in production")
+		}
+		if len([]byte(cfg.JWT.Secret)) < 32 {
+			return fmt.Errorf("jwt secret must be at least 32 bytes in production")
+		}
+		if isPlaceholderJWTSecret(cfg.JWT.Secret) {
+			return fmt.Errorf("jwt secret must be replaced with a unique secret in production")
+		}
+	}
 	if cfg.App.BaseDomain == "" {
 		return fmt.Errorf("base domain is required")
 	}
+	if cfg.App.CORSEnabled {
+		origins := cfg.App.AllowedCORSOrigins()
+		if len(origins) == 0 && !cfg.App.Debug {
+			return fmt.Errorf("cors origins are required when CORS is enabled with debug disabled")
+		}
+		for _, origin := range origins {
+			if err := validateCORSOrigin(origin); err != nil {
+				return err
+			}
+			if !cfg.App.Debug && origin == "*" {
+				return fmt.Errorf("wildcard CORS origin is not allowed with debug disabled")
+			}
+		}
+	}
 	if cfg.App.ShortCodeLength < 3 || cfg.App.ShortCodeLength > 10 {
 		return fmt.Errorf("short code length must be between 3 and 10")
+	}
+
+	return nil
+}
+
+// AllowedCORSOrigins returns the configured browser origins. Origins are
+// comma-separated so they can be supplied through a single environment
+// variable in a 12-factor deployment.
+func (c AppConfig) AllowedCORSOrigins() []string {
+	var origins []string
+	for _, origin := range strings.Split(c.CORSOrigins, ",") {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+
+	return origins
+}
+
+func isPlaceholderJWTSecret(secret string) bool {
+	switch strings.TrimSpace(strings.ToLower(secret)) {
+	case "dev_jwt_secret_change_in_production",
+		"change-this-in-production",
+		"your-secure-jwt-secret-minimum-32-characters":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCORSOrigin(origin string) error {
+	if origin == "*" {
+		return nil
+	}
+
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("invalid CORS origin %q: expected an http(s) origin without a path", origin)
 	}
 
 	return nil

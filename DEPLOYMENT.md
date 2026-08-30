@@ -20,6 +20,7 @@ automatically when the application starts.
 ~~~bash
 cp .env.production.example .env.production
 # Edit .env.production: set a real DB_PASSWORD and JWT_SECRET at minimum.
+# APP_ENV=production makes startup reject placeholder or short JWT secrets.
 
 docker compose --env-file .env.production config --quiet
 docker compose --env-file .env.production up -d --build
@@ -75,6 +76,7 @@ APP_TLS=true              # only when HTTPS is provided at the public edge
 JWT_SECRET=<long-random-secret>
 JWT_EXPIRATION=24h
 CORS_ENABLED=false
+CORS_ORIGINS=                 # required if CORS_ENABLED=true
 DEBUG=false
 LOG_LEVEL=info
 LOG_FORMAT=json
@@ -83,6 +85,10 @@ LOG_FORMAT=json
 OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET, and OAUTH2_REDIRECT_URI describe the
 bundled CLI client. The CLI uses PKCE and a localhost callback; this is not yet
 a general-purpose multi-client authorization service.
+
+When browser clients need cross-origin API access, set CORS_ENABLED=true and
+CORS_ORIGINS to a comma-separated list of exact `http://` or `https://`
+origins, without paths. Wildcard CORS is available only when DEBUG=true.
 
 Configuration precedence and all supported variables are documented in the
 README and maigo.example.yaml.

@@ -1,7 +1,9 @@
 app:
   name: "Maigo Test"
+  environment: test
   debug: true
   cors_enabled: true
+  cors_origins: ""
   tls: false
   short_code_length: 6
   base_domain: "localhost:8080"

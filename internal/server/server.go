@@ -47,9 +47,15 @@ func NewHTTPServer(cfg *config.Config, db *pgxpool.Pool, log *logger.Logger) *HT
 	// Add CORS middleware if enabled
 	if cfg.App.CORSEnabled {
 		corsConfig := cors.DefaultConfig()
-		corsConfig.AllowOrigins = []string{"*"} // Configure this properly for production
+		corsOrigins := cfg.App.AllowedCORSOrigins()
+		if len(corsOrigins) == 0 && cfg.App.Debug {
+			corsOrigins = []string{"*"}
+		}
+		corsConfig.AllowOrigins = corsOrigins
+		corsConfig.AllowCredentials = len(corsOrigins) > 0 && corsOrigins[0] != "*"
 		corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-		corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Authorization"}
+		corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Authorization", "X-Request-ID"}
+		corsConfig.ExposeHeaders = []string{"X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"}
 		engine.Use(cors.New(corsConfig))
 	}
 

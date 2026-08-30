@@ -44,6 +44,7 @@ services:
       # Server Configuration
       PORT: ${PORT:-8080}
       HOST: ${HOST:-0.0.0.0}
+      APP_ENV: ${APP_ENV:-development}
 
       # OAuth Configuration
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
@@ -59,6 +60,7 @@ services:
       APP_TLS: ${APP_TLS:-false}
       DEBUG: ${DEBUG:-false}
       CORS_ENABLED: ${CORS_ENABLED:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
       RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1h}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-24h}

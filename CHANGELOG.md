@@ -6,6 +6,11 @@ All notable changes to Maigo will be documented here. The format follows
 
 ## [Unreleased]
 
+### Production-readiness follow-up
+
+- Added explicit CORS origin configuration with debug-only wildcard behavior.
+- Added production-mode validation for debug settings and JWT placeholders.
+
 ### Added
 
 - Pinned Go, Air, golangci-lint, migrate, GoReleaser, and goimports tooling in
