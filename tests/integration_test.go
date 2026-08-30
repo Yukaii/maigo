@@ -615,6 +615,13 @@ func (suite *IntegrationTestSuite) TestExpiredURLDoesNotRedirectOrCountAsAHit() 
 		"SELECT hits FROM urls WHERE short_code = $1", "expired").Scan(&hits)
 	require.NoError(suite.T(), err)
 	assert.Zero(suite.T(), hits)
+
+	var clickEvents int64
+	err = suite.db.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM click_events
+		WHERE url_id = (SELECT id FROM urls WHERE short_code = $1)`, "expired").Scan(&clickEvents)
+	require.NoError(suite.T(), err)
+	assert.Zero(suite.T(), clickEvents)
 }
 
 func cloneURLValues(values url.Values) url.Values {
@@ -658,9 +665,6 @@ func (suite *IntegrationTestSuite) TestHitTracking() {
 		suite.server.ServeHTTP(w, req)
 		assert.Equal(suite.T(), http.StatusFound, w.Code)
 
-		// Small delay to allow hit increment goroutine to complete
-		time.Sleep(10 * time.Millisecond)
-
 		// Check hit count after each redirect
 		req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/tracking", http.NoBody)
 		w = httptest.NewRecorder()
@@ -671,6 +675,91 @@ func (suite *IntegrationTestSuite) TestHitTracking() {
 		require.NoError(suite.T(), err)
 		assert.Equal(suite.T(), float64(i), urlResponse["hits"])
 	}
+
+	var clickEvents int64
+	err = suite.db.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM click_events
+		WHERE url_id = (SELECT id FROM urls WHERE short_code = $1)`, "tracking").Scan(&clickEvents)
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), int64(3), clickEvents)
+}
+
+// TestURLStatsTimeline verifies that stored click events are returned in UTC
+// day buckets rather than being synthesized from the aggregate hit count.
+func (suite *IntegrationTestSuite) TestURLStatsTimeline() {
+	createReq := models.CreateURLRequest{
+		URL:    "https://example.com/analytics",
+		Custom: "analytics",
+	}
+	body, err := json.Marshal(createReq)
+	require.NoError(suite.T(), err)
+
+	req := suite.createAuthenticatedRequest(body)
+	w := httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusCreated, w.Code)
+
+	var urlID int64
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT id FROM urls WHERE short_code = $1", "analytics").Scan(&urlID)
+	require.NoError(suite.T(), err)
+
+	// A URL without click events should expose an empty timeline, not a
+	// fabricated bucket based on its creation date.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/analytics/stats", http.NoBody)
+	token := suite.createTestJWT(suite.testUser.ID, suite.testUser.Username, suite.testUser.Email)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusOK, w.Code)
+
+	var emptyResponse struct {
+		Timeline []struct {
+			Date string `json:"date"`
+			Hits int64  `json:"hits"`
+		} `json:"timeline"`
+	}
+	require.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &emptyResponse))
+	assert.Empty(suite.T(), emptyResponse.Timeline)
+
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1)
+	_, err = suite.db.Exec(context.Background(), `
+		INSERT INTO click_events (url_id, clicked_at)
+		VALUES ($1, $2), ($1, $2), ($1, $3)`, urlID, yesterday, now)
+	require.NoError(suite.T(), err)
+	_, err = suite.db.Exec(context.Background(),
+		"UPDATE urls SET hits = hits + 3 WHERE id = $1", urlID)
+	require.NoError(suite.T(), err)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/urls/analytics/stats", http.NoBody)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusOK, w.Code)
+
+	var response struct {
+		Hits     int64 `json:"hits"`
+		Timeline []struct {
+			Date string `json:"date"`
+			Hits int64  `json:"hits"`
+		} `json:"timeline"`
+	}
+	require.NoError(suite.T(), json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(suite.T(), int64(3), response.Hits)
+
+	expected := map[string]int64{
+		yesterday.Format("2006-01-02"): 2,
+		now.Format("2006-01-02"):       1,
+	}
+	require.Len(suite.T(), response.Timeline, len(expected))
+	for _, point := range response.Timeline {
+		expectedHits, ok := expected[point.Date]
+		require.True(suite.T(), ok, "unexpected timeline date %q", point.Date)
+		assert.Equal(suite.T(), expectedHits, point.Hits)
+		delete(expected, point.Date)
+	}
+	assert.Empty(suite.T(), expected)
 }
 
 // TestConcurrentURLCreation tests creating URLs concurrently

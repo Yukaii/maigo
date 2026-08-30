@@ -12,6 +12,8 @@ All notable changes to Maigo will be documented here. The format follows
 - Added production-mode validation for debug settings and JWT placeholders.
 - Wired Redis into server startup and added atomic distributed rate limiting
   with auth-endpoint protection and a bounded in-process fallback.
+- Added transactional click-event recording and UTC day-bucketed URL
+  statistics.
 
 ### Added
 
@@ -27,6 +29,8 @@ All notable changes to Maigo will be documented here. The format follows
 - Updated CI to use pinned tool versions and a configured integration database.
 - Wired Compose base-domain, TLS, rate-limit, and database settings through to
   the application.
+- Documented the statistics timeline as stored click-event buckets and called
+  out the remaining click-event retention gap.
 
 ### Fixed
 

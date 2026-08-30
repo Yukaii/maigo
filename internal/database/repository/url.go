@@ -4,6 +4,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -211,19 +212,78 @@ func (r *URLRepository) DeleteByUserAndID(ctx context.Context, userID, urlID int
 	return nil
 }
 
-// IncrementHits increments the hit counter for a URL
-func (r *URLRepository) IncrementHits(ctx context.Context, shortCode string) error {
-	query := `
-		UPDATE urls
-		SET hits = hits + 1
-		WHERE short_code = $1`
-
-	_, err := r.db.Exec(ctx, query, shortCode)
+// RecordClick stores a click event and updates the URL aggregate atomically.
+func (r *URLRepository) RecordClick(ctx context.Context, urlID int64) error {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to increment hits: %w", err)
+		return fmt.Errorf("failed to begin click transaction: %w", err)
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				slog.Debug("Failed to rollback click transaction", "error", rollbackErr)
+			}
+		}
+	}()
+
+	if _, execErr := tx.Exec(ctx,
+		`INSERT INTO click_events (url_id) VALUES ($1)`, urlID,
+	); execErr != nil {
+		return fmt.Errorf("failed to record click event: %w", execErr)
 	}
 
+	result, err := tx.Exec(ctx,
+		`UPDATE urls SET hits = hits + 1 WHERE id = $1`, urlID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update URL hit count: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("URL not found")
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit click transaction: %w", err)
+	}
+	rollback = false
+
 	return nil
+}
+
+// GetClickTimeline returns click counts grouped by UTC calendar day.
+func (r *URLRepository) GetClickTimeline(
+	ctx context.Context,
+	urlID int64,
+) ([]models.ClickTimelinePoint, error) {
+	query := `
+		SELECT date_trunc('day', clicked_at AT TIME ZONE 'UTC') AS date,
+		       COUNT(*)::bigint AS hits
+		FROM click_events
+		WHERE url_id = $1
+		GROUP BY 1
+		ORDER BY 1`
+
+	rows, err := r.db.Query(ctx, query, urlID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query click timeline: %w", err)
+	}
+	defer rows.Close()
+
+	var timeline []models.ClickTimelinePoint
+	for rows.Next() {
+		var point models.ClickTimelinePoint
+		if err := rows.Scan(&point.Date, &point.Hits); err != nil {
+			return nil, fmt.Errorf("failed to scan click timeline: %w", err)
+		}
+		timeline = append(timeline, point)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating click timeline: %w", err)
+	}
+
+	return timeline, nil
 }
 
 // List retrieves URLs with pagination

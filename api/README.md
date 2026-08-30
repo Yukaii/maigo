@@ -80,6 +80,15 @@ an explicit expiration must be in the future. Expired links return HTTP 410
 from the redirect endpoint and do not count a hit. URL metadata remains
 available and includes `expired: true`.
 
+Each successful, non-expired redirect records a click event and updates the
+aggregate `hits` count in one database transaction. The owner-only statistics
+endpoint returns `timeline` as UTC calendar-day buckets. It returns an empty
+array when no clicks have been recorded. If click persistence is temporarily
+unavailable, the redirect still proceeds and the server logs the tracking
+failure. Clicks that occurred before this migration cannot be reconstructed,
+so a legacy URL’s aggregate `hits` value may be larger than the sum of its
+timeline buckets.
+
 ## Routes at a glance
 
 - `GET /health` — liveness.
@@ -133,9 +142,9 @@ Then visit <http://localhost:8081>.
 
 ## Current limitations
 
-The statistics timeline is currently an aggregate point, not a stored
-time-series. Configure HTTPS, Redis or an edge limiter for horizontal scale,
-and a real secret manager for any deployment beyond local development. See
+Click events currently have no retention policy. Configure HTTPS, Redis or an
+edge limiter for horizontal scale, and a real secret manager for any
+deployment beyond local development. See
 [`docs/STATUS.md`](../docs/STATUS.md) for the fuller audit and next steps.
 
 ## License

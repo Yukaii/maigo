@@ -39,6 +39,8 @@ CLI/API use. It is not yet a production-ready hosted service.
   place of the consent page.
 - Fixed dynamic repository update SQL construction and the missing production
   Docker configuration copy.
+- Added a persisted click-event ledger, transactional aggregate hit updates,
+  and UTC day-bucketed URL statistics.
 - Pinned the CI Go, goimports, and golangci-lint versions to the local mise
   toolchain.
 - Updated the README, deployment notes, API guide, and OpenAPI paths to match
@@ -46,8 +48,11 @@ CLI/API use. It is not yet a production-ready hosted service.
 
 ## Known limitations
 
-- The statistics `timeline` is currently one aggregate point derived from the
-  URL total; there is no click-event or daily analytics table yet.
+- Click events are retained indefinitely; a retention policy or archival
+  strategy is still needed before high-volume production use.
+- Existing aggregate hit counts are not backfilled into click events because
+  their original click times are unavailable; legacy URLs may therefore have
+  a timeline total lower than their aggregate `hits` value.
 - Redis-backed rate limiting is now available for the running server. It uses
   an atomic fixed-window script and fail-closed behavior by default when
   enabled. With Redis disabled, the fallback is a bounded per-client
@@ -57,19 +62,21 @@ CLI/API use. It is not yet a production-ready hosted service.
   Multi-device sessions would need a migration and a session-management model.
 - Access JWTs are stateless. Logout immediately revokes refresh sessions, but
   an already-issued access token remains valid until its configured expiry.
-- Hit increments are asynchronous; a process shutdown immediately after a
-  redirect can lose the last increment.
+- Click recording is synchronous and transactional with the aggregate hit
+  update. If the tracking write fails, the redirect still proceeds and the
+  event is logged rather than retried through a durable queue.
 - Development may use wildcard CORS when `DEBUG=true`; non-debug deployments
   require explicit origins, and `APP_ENV=production` rejects placeholder
   database, Redis, or short/known JWT secrets. The default deployment still
   assumes a reverse proxy will provide HTTPS. These are deliberate prototype
   defaults, not a full security baseline.
-- There is no cleanup job for expired URLs, authorization codes, or old access
-  token records.
+- There is no cleanup job for expired URLs, authorization codes, old access
+  token records, or retained click events.
 
 ## Recommended next work
 
-1. Add a stored click-event table and real time-bucketed statistics.
+1. Add click-event retention/archival controls and operational metrics for
+   tracking failures.
 2. Make Redis or an equivalent edge limiter part of the required topology for
    horizontally scaled deployments, and add per-user/IP policy tests.
 3. Add key rotation/JWK or another managed signing-key strategy before

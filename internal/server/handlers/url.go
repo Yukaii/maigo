@@ -220,15 +220,14 @@ func (h *URLHandler) RedirectShortURL(c *gin.Context) {
 		return
 	}
 
-	// Increment hit counter (non-blocking)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := h.urlRepo.IncrementHits(ctx, shortCode); err != nil {
-			h.logger.Error("Failed to increment hits", "short_code", shortCode, "error", err)
-		}
-	}()
+	// Persist the event before redirecting so the aggregate and event ledger
+	// stay in sync. A tracking outage must not take down the core redirect path.
+	clickCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	clickErr := h.urlRepo.RecordClick(clickCtx, url.ID)
+	cancel()
+	if clickErr != nil {
+		h.logger.Error("Failed to record URL click", "short_code", shortCode, "url_id", url.ID, "error", clickErr)
+	}
 
 	h.logger.Info("Redirecting URL",
 		"short_code", shortCode,
@@ -399,14 +398,21 @@ func (h *URLHandler) GetURLStats(c *gin.Context) {
 		"created_at": url.CreatedAt.Format(time.RFC3339),
 	}
 
-	// The current schema stores only the aggregate hit count, so expose one
-	// point until click events and time-bucketed analytics are added.
-	response["timeline"] = []map[string]interface{}{
-		{
-			"date": url.CreatedAt.Format("2006-01-02"),
-			"hits": url.Hits,
-		},
+	timelinePoints, err := h.urlRepo.GetClickTimeline(c.Request.Context(), url.ID)
+	if err != nil {
+		h.logger.Error("Failed to retrieve URL click timeline", "short_code", shortCode, "url_id", url.ID, "error", err)
+		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to retrieve URL statistics", nil)
+		return
 	}
+
+	timeline := make([]map[string]any, 0, len(timelinePoints))
+	for _, point := range timelinePoints {
+		timeline = append(timeline, map[string]any{
+			"date": point.Date.UTC().Format("2006-01-02"),
+			"hits": point.Hits,
+		})
+	}
+	response["timeline"] = timeline
 
 	h.logger.Info("Retrieved URL statistics", "short_code", shortCode, "user_id", uid)
 

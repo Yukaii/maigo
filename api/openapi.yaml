@@ -474,7 +474,7 @@ paths:
           schema: { type: string, pattern: '^[0-9A-Za-z]{1,50}$' }
       responses:
         '302':
-          description: Redirect to target URL; increments hits asynchronously
+          description: Redirect to target URL after recording a click event and updating the aggregate hit count. Redirects remain available if click persistence is temporarily unavailable.
           headers:
             Location:
               schema: { type: string, format: uri }
@@ -692,9 +692,10 @@ components:
           properties:
             timeline:
               type: array
-              description: Current implementation returns one aggregate point; click-event analytics are planned.
+              description: Click counts grouped by UTC calendar day. Empty when the URL has no recorded clicks. Legacy aggregate hits from before click-event tracking are not reconstructed.
               items:
                 type: object
+                required: [date, hits]
                 properties:
                   date: { type: string, format: date }
                   hits: { type: integer, format: int64 }

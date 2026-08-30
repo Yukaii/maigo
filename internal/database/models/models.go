@@ -25,6 +25,12 @@ type URL struct {
 	UserID    *int64     `json:"user_id,omitempty" db:"user_id"`
 }
 
+// ClickTimelinePoint represents the number of click events in one UTC day.
+type ClickTimelinePoint struct {
+	Date time.Time `json:"date" db:"date"`
+	Hits int64     `json:"hits" db:"hits"`
+}
+
 // IsExpired checks if the URL has expired
 func (u *URL) IsExpired() bool {
 	if u.ExpiresAt == nil {
