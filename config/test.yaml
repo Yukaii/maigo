@@ -41,6 +41,10 @@ oauth2:
   client_secret: "cli-client-secret-not-used-with-pkce"
   redirect_uri: "http://localhost:8000/callback"
 
+analytics:
+  click_event_retention: "2160h"
+  cleanup_interval: "1h"
+
 log:
   level: "debug"
   format: "text"

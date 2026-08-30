@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,10 @@ import (
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/database/models"
+	"github.com/yukaii/maigo/internal/database/repository"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/maintenance"
+	"github.com/yukaii/maigo/internal/metrics"
 	"github.com/yukaii/maigo/internal/server"
 )
 
@@ -682,6 +686,14 @@ func (suite *IntegrationTestSuite) TestHitTracking() {
 		WHERE url_id = (SELECT id FROM urls WHERE short_code = $1)`, "tracking").Scan(&clickEvents)
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), int64(3), clickEvents)
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
+	w = httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusOK, w.Code)
+	recordedCount, err := metricValue(w.Body.String(), "maigo_click_events_recorded_total")
+	require.NoError(suite.T(), err)
+	assert.GreaterOrEqual(suite.T(), recordedCount, uint64(3))
 }
 
 // TestURLStatsTimeline verifies that stored click events are returned in UTC
@@ -760,6 +772,118 @@ func (suite *IntegrationTestSuite) TestURLStatsTimeline() {
 		delete(expected, point.Date)
 	}
 	assert.Empty(suite.T(), expected)
+}
+
+// TestClickEventRetentionCleanup verifies that retention removes only old
+// event rows while leaving the URL's lifetime aggregate untouched.
+func (suite *IntegrationTestSuite) TestClickEventRetentionCleanup() {
+	createReq := models.CreateURLRequest{
+		URL:    "https://example.com/retention",
+		Custom: "retention",
+	}
+	body, err := json.Marshal(createReq)
+	require.NoError(suite.T(), err)
+
+	req := suite.createAuthenticatedRequest(body)
+	w := httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusCreated, w.Code)
+
+	var urlID int64
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT id FROM urls WHERE short_code = $1", "retention").Scan(&urlID)
+	require.NoError(suite.T(), err)
+
+	now := time.Now().UTC()
+	_, err = suite.db.Exec(context.Background(), `
+		INSERT INTO click_events (url_id, clicked_at)
+		VALUES ($1, $2), ($1, $3)`, urlID, now.Add(-48*time.Hour), now.Add(-time.Hour))
+	require.NoError(suite.T(), err)
+	_, err = suite.db.Exec(context.Background(),
+		"UPDATE urls SET hits = hits + 2 WHERE id = $1", urlID)
+	require.NoError(suite.T(), err)
+
+	telemetry := metrics.New()
+	worker := maintenance.NewClickRetentionWorker(
+		repository.NewURLRepository(suite.db),
+		24*time.Hour,
+		time.Hour,
+		suite.logger,
+		telemetry,
+	)
+	require.NoError(suite.T(), worker.RunOnce(context.Background()))
+
+	var oldEvents, recentEvents, hits int64
+	err = suite.db.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM click_events
+		WHERE url_id = $1 AND clicked_at < NOW() - INTERVAL '24 hours'`, urlID).Scan(&oldEvents)
+	require.NoError(suite.T(), err)
+	err = suite.db.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM click_events
+		WHERE url_id = $1 AND clicked_at >= NOW() - INTERVAL '24 hours'`, urlID).Scan(&recentEvents)
+	require.NoError(suite.T(), err)
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT hits FROM urls WHERE id = $1", urlID).Scan(&hits)
+	require.NoError(suite.T(), err)
+
+	assert.Zero(suite.T(), oldEvents)
+	assert.Equal(suite.T(), int64(1), recentEvents)
+	assert.Equal(suite.T(), int64(2), hits)
+	retentionRuns, err := metricValue(telemetry.RenderPrometheus(), "maigo_click_retention_runs_total")
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), uint64(1), retentionRuns)
+	deletedEvents, err := metricValue(telemetry.RenderPrometheus(), "maigo_click_events_deleted_total")
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), uint64(1), deletedEvents)
+}
+
+// TestClickTrackingFailureIsObservable verifies that a click persistence
+// outage does not break redirects and increments the failure counter.
+func (suite *IntegrationTestSuite) TestClickTrackingFailureIsObservable() {
+	createReq := models.CreateURLRequest{
+		URL:    "https://example.com/tracking-failure",
+		Custom: "failtrack",
+	}
+	body, err := json.Marshal(createReq)
+	require.NoError(suite.T(), err)
+
+	req := suite.createAuthenticatedRequest(body)
+	w := httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusCreated, w.Code)
+
+	_, err = suite.db.Exec(context.Background(),
+		"ALTER TABLE click_events RENAME TO click_events_tracking_outage")
+	require.NoError(suite.T(), err)
+	defer func() {
+		_, restoreErr := suite.db.Exec(context.Background(),
+			"ALTER TABLE click_events_tracking_outage RENAME TO click_events")
+		require.NoError(suite.T(), restoreErr)
+	}()
+
+	req = httptest.NewRequest(http.MethodGet, "/failtrack", http.NoBody)
+	w = httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusFound, w.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
+	w = httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	require.Equal(suite.T(), http.StatusOK, w.Code)
+	failureCount, err := metricValue(w.Body.String(), "maigo_click_event_record_failures_total")
+	require.NoError(suite.T(), err)
+	assert.GreaterOrEqual(suite.T(), failureCount, uint64(1))
+}
+
+func metricValue(rendered, name string) (uint64, error) {
+	prefix := name + " "
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, prefix)), 10, 64)
+		}
+	}
+
+	return 0, fmt.Errorf("metric %q not found", name)
 }
 
 // TestConcurrentURLCreation tests creating URLs concurrently

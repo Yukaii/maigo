@@ -15,6 +15,7 @@ import (
 	"github.com/yukaii/maigo/internal/database/models"
 	"github.com/yukaii/maigo/internal/database/repository"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/metrics"
 	"github.com/yukaii/maigo/internal/shortener"
 )
 
@@ -24,12 +25,16 @@ type URLHandler struct {
 	config    *config.Config
 	logger    *logger.Logger
 	urlRepo   *repository.URLRepository
+	metrics   *metrics.Metrics
 	shortener *shortener.ShortenerService
 }
 
 // NewURLHandler creates a new URL handler
-func NewURLHandler(db *pgxpool.Pool, cfg *config.Config, log *logger.Logger) *URLHandler {
+func NewURLHandler(db *pgxpool.Pool, cfg *config.Config, log *logger.Logger, telemetry *metrics.Metrics) *URLHandler {
 	urlRepo := repository.NewURLRepository(db)
+	if telemetry == nil {
+		telemetry = metrics.New()
+	}
 
 	// Create shortener service with existence checker
 	shortenerService := shortener.NewShortenerService(
@@ -44,6 +49,7 @@ func NewURLHandler(db *pgxpool.Pool, cfg *config.Config, log *logger.Logger) *UR
 		config:    cfg,
 		logger:    log,
 		urlRepo:   urlRepo,
+		metrics:   telemetry,
 		shortener: shortenerService,
 	}
 }
@@ -222,11 +228,15 @@ func (h *URLHandler) RedirectShortURL(c *gin.Context) {
 
 	// Persist the event before redirecting so the aggregate and event ledger
 	// stay in sync. A tracking outage must not take down the core redirect path.
+	h.metrics.IncRedirects()
 	clickCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	clickErr := h.urlRepo.RecordClick(clickCtx, url.ID)
 	cancel()
 	if clickErr != nil {
+		h.metrics.IncClickEventRecordFailures()
 		h.logger.Error("Failed to record URL click", "short_code", shortCode, "url_id", url.ID, "error", clickErr)
+	} else {
+		h.metrics.IncClickEventsRecorded()
 	}
 
 	h.logger.Info("Redirecting URL",

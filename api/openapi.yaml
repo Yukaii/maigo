@@ -13,6 +13,7 @@ servers:
     description: Local development server
 tags:
   - name: Health
+  - name: Operations
   - name: OAuth 2.0
   - name: Authentication
   - name: URLs
@@ -56,6 +57,18 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /metrics:
+    get:
+      tags: [Operations]
+      summary: Prometheus operational metrics
+      description: Returns process-local counters. Restrict this endpoint at the network edge or through an authenticated proxy.
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema: { type: string }
 
   /oauth/authorize:
     get:

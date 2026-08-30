@@ -14,6 +14,8 @@ All notable changes to Maigo will be documented here. The format follows
   with auth-endpoint protection and a bounded in-process fallback.
 - Added transactional click-event recording and UTC day-bucketed URL
   statistics.
+- Added configurable, batched click-event retention and Prometheus-format
+  operational counters for redirect and cleanup failures.
 
 ### Added
 
@@ -31,6 +33,8 @@ All notable changes to Maigo will be documented here. The format follows
   the application.
 - Documented the statistics timeline as stored click-event buckets and called
   out the remaining click-event retention gap.
+- Documented retention settings and private metrics scraping in the deployment
+  and API guides.
 
 ### Fixed
 

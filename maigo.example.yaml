@@ -62,6 +62,12 @@ redis:
   db: 0
   fail_open: false
 
+# Click-event analytics and retention
+analytics:
+  # Go duration. Set to 0 to disable cleanup (not recommended in production).
+  click_event_retention: 2160h
+  cleanup_interval: 1h
+
 # Logging Configuration
 log:
   level: debug

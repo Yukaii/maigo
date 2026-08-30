@@ -13,6 +13,7 @@ import (
 
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/metrics"
 	"github.com/yukaii/maigo/internal/server/handlers"
 	"github.com/yukaii/maigo/internal/server/middleware"
 )
@@ -22,11 +23,12 @@ var templatesFS embed.FS
 
 // HTTPServer wraps Gin engine with our configuration
 type HTTPServer struct {
-	engine *gin.Engine
-	config *config.Config
-	db     *pgxpool.Pool
-	redis  *redis.Client
-	logger *logger.Logger
+	engine  *gin.Engine
+	config  *config.Config
+	db      *pgxpool.Pool
+	redis   *redis.Client
+	logger  *logger.Logger
+	metrics *metrics.Metrics
 }
 
 // NewHTTPServer creates a new HTTP server instance
@@ -44,6 +46,7 @@ func NewHTTPServerWithRedis(
 ) *HTTPServer {
 	// Create Gin engine
 	engine := gin.New()
+	telemetry := metrics.New()
 	if err := engine.SetTrustedProxies(cfg.App.TrustedProxyList()); err != nil {
 		// Configuration is validated before this constructor is called. Keep a
 		// safe direct-connection policy if a caller constructs Config manually.
@@ -85,11 +88,12 @@ func NewHTTPServerWithRedis(
 	}
 
 	server := &HTTPServer{
-		engine: engine,
-		config: cfg,
-		db:     db,
-		redis:  redisClient,
-		logger: log,
+		engine:  engine,
+		config:  cfg,
+		db:      db,
+		redis:   redisClient,
+		logger:  log,
+		metrics: telemetry,
 	}
 
 	// Setup routes
@@ -130,9 +134,10 @@ func (s *HTTPServer) rateLimiter(rateLimitConfig config.RateLimitConfig, keyPref
 func (s *HTTPServer) setupRoutes() {
 	// Initialize handlers
 	healthHandler := handlers.NewHealthHandler(s.db, s.logger, s.redis)
-	urlHandler := handlers.NewURLHandler(s.db, s.config, s.logger)
+	urlHandler := handlers.NewURLHandler(s.db, s.config, s.logger, s.metrics)
 	authHandler := handlers.NewAuthHandler(s.db, s.config, s.logger)
 	oauthHandler := handlers.NewOAuthHandler(s.db, s.config, s.logger)
+	metricsHandler := handlers.NewMetricsHandler(s.metrics)
 	authRateLimiter := s.rateLimiter(s.config.App.AuthRateLimit, "ratelimit:auth")
 	urlRateLimiter := s.rateLimiter(s.config.App.RateLimit, "ratelimit:url")
 
@@ -141,6 +146,7 @@ func (s *HTTPServer) setupRoutes() {
 	s.engine.HEAD("/health", healthHandler.HealthCheck)
 	s.engine.GET("/health/ready", healthHandler.ReadinessCheck)
 	s.engine.HEAD("/health/ready", healthHandler.ReadinessCheck)
+	s.engine.GET("/metrics", metricsHandler.ServeMetrics)
 
 	// OAuth 2.0 endpoints
 	oauth := s.engine.Group("/oauth")
@@ -184,6 +190,11 @@ func (s *HTTPServer) setupRoutes() {
 			"message": "The requested resource was not found",
 		})
 	})
+}
+
+// Metrics returns the server's process-local operational counters.
+func (s *HTTPServer) Metrics() *metrics.Metrics {
+	return s.metrics
 }
 
 // Shutdown gracefully shuts down the server

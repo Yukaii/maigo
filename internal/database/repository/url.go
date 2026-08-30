@@ -19,6 +19,8 @@ type URLRepository struct {
 	db *pgxpool.Pool
 }
 
+const clickEventDeleteBatchSize int64 = 1000
+
 // NewURLRepository creates a new URL repository
 func NewURLRepository(db *pgxpool.Pool) *URLRepository {
 	return &URLRepository{db: db}
@@ -284,6 +286,35 @@ func (r *URLRepository) GetClickTimeline(
 	}
 
 	return timeline, nil
+}
+
+// DeleteClickEventsBefore removes old click events in bounded batches and
+// returns the total number deleted. URL aggregate hit totals are intentionally
+// preserved because they represent lifetime hits rather than retained events.
+func (r *URLRepository) DeleteClickEventsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	const query = `
+		DELETE FROM click_events
+		WHERE id IN (
+			SELECT id
+			FROM click_events
+			WHERE clicked_at < $1
+			ORDER BY clicked_at, id
+			LIMIT $2
+		)`
+
+	var deletedTotal int64
+	for {
+		result, err := r.db.Exec(ctx, query, cutoff, clickEventDeleteBatchSize)
+		if err != nil {
+			return deletedTotal, fmt.Errorf("failed to delete expired click events: %w", err)
+		}
+
+		deleted := result.RowsAffected()
+		deletedTotal += deleted
+		if deleted < clickEventDeleteBatchSize {
+			return deletedTotal, nil
+		}
+	}
 }
 
 // List retrieves URLs with pagination

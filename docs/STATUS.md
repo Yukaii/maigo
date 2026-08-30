@@ -15,7 +15,10 @@ CLI/API use. It is not yet a production-ready hosted service.
 - `mise exec -- golangci-lint run --timeout=5m` passes.
 - The PostgreSQL integration suite passes against an isolated PostgreSQL 16
   container, including authentication, OAuth/PKCE, refresh rotation, logout,
-  hit tracking, concurrent URL creation, and expiration checks.
+  hit tracking, click retention, concurrent URL creation, and expiration
+  checks.
+- Prometheus-format operational counters cover redirects, click persistence,
+  and retention cleanup; the metrics endpoint is available for scraping.
 - `mise exec -- goreleaser check` passes.
 - `Dockerfile.production` builds and the resulting image runs its CLI smoke
   command on the current host architecture.
@@ -41,6 +44,8 @@ CLI/API use. It is not yet a production-ready hosted service.
   Docker configuration copy.
 - Added a persisted click-event ledger, transactional aggregate hit updates,
   and UTC day-bucketed URL statistics.
+- Added configurable click-event retention with batched cleanup, graceful
+  server shutdown, and operational counters for tracking and cleanup failures.
 - Pinned the CI Go, goimports, and golangci-lint versions to the local mise
   toolchain.
 - Updated the README, deployment notes, API guide, and OpenAPI paths to match
@@ -48,8 +53,8 @@ CLI/API use. It is not yet a production-ready hosted service.
 
 ## Known limitations
 
-- Click events are retained indefinitely; a retention policy or archival
-  strategy is still needed before high-volume production use.
+- Click-event retention defaults to 90 days and is configurable. Retention
+  deletes event rows but intentionally preserves lifetime URL hit totals.
 - Existing aggregate hit counts are not backfilled into click events because
   their original click times are unavailable; legacy URLs may therefore have
   a timeline total lower than their aggregate `hits` value.
@@ -64,19 +69,22 @@ CLI/API use. It is not yet a production-ready hosted service.
   an already-issued access token remains valid until its configured expiry.
 - Click recording is synchronous and transactional with the aggregate hit
   update. If the tracking write fails, the redirect still proceeds and the
-  event is logged rather than retried through a durable queue.
+  event is logged and counted rather than retried through a durable queue.
+- Metrics are process-local counters that reset on restart; `/metrics` has no
+  built-in authentication and must be kept on a private network path or behind
+  an authenticated proxy.
 - Development may use wildcard CORS when `DEBUG=true`; non-debug deployments
   require explicit origins, and `APP_ENV=production` rejects placeholder
   database, Redis, or short/known JWT secrets. The default deployment still
   assumes a reverse proxy will provide HTTPS. These are deliberate prototype
   defaults, not a full security baseline.
-- There is no cleanup job for expired URLs, authorization codes, old access
-  token records, or retained click events.
+- There is no cleanup job for expired URLs, authorization codes, or old access
+  token records. Click-event cleanup is now covered by the retention worker.
 
 ## Recommended next work
 
-1. Add click-event retention/archival controls and operational metrics for
-   tracking failures.
+1. Add a durable click-event outbox/retry path if tracking every redirect
+   across database outages is a hard requirement.
 2. Make Redis or an equivalent edge limiter part of the required topology for
    horizontally scaled deployments, and add per-user/IP policy tests.
 3. Add key rotation/JWK or another managed signing-key strategy before
@@ -85,8 +93,8 @@ CLI/API use. It is not yet a production-ready hosted service.
    from the one-row-per-user constraint.
 5. Add HTTP integration coverage for malformed redirects, token algorithms,
    CORS policy, pagination bounds, and all documented error responses.
-6. Add OpenAPI validation to CI and add Redis-backed integration coverage to the
-   normal production-like test profile.
+6. Add OpenAPI validation to CI and include Redis-backed integration coverage
+   in the normal production-like test profile.
 
 ## Running the checks
 

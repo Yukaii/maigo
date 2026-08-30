@@ -547,10 +547,64 @@ func TestValidateConfigRedisSettings(t *testing.T) {
 	}
 }
 
+func TestValidateConfigAnalyticsSettings(t *testing.T) {
+	baseConfig := Config{
+		Database: DatabaseConfig{URL: "postgres://user:pass@host:5432/db"},
+		OAuth2:   OAuth2Config{ClientID: "client-id", ClientSecret: "client-secret"},
+		JWT:      JWTConfig{Secret: "jwt-secret"},
+		App:      AppConfig{BaseDomain: "example.com", ShortCodeLength: 6},
+	}
+
+	tests := []struct {
+		name          string
+		analytics     AnalyticsConfig
+		errorContains string
+	}{
+		{
+			name:      "accepts enabled retention",
+			analytics: AnalyticsConfig{ClickEventRetention: 90 * 24 * time.Hour, CleanupInterval: time.Hour},
+		},
+		{
+			name:      "allows disabled retention",
+			analytics: AnalyticsConfig{},
+		},
+		{
+			name:          "rejects negative retention",
+			analytics:     AnalyticsConfig{ClickEventRetention: -time.Hour},
+			errorContains: "retention cannot be negative",
+		},
+		{
+			name:          "rejects negative cleanup interval",
+			analytics:     AnalyticsConfig{CleanupInterval: -time.Minute},
+			errorContains: "cleanup interval cannot be negative",
+		},
+		{
+			name:          "requires cleanup interval when retention is enabled",
+			analytics:     AnalyticsConfig{ClickEventRetention: 24 * time.Hour},
+			errorContains: "cleanup interval is required",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseConfig
+			cfg.Analytics = test.analytics
+			err := validateConfig(&cfg)
+			if test.errorContains == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.errorContains)
+		})
+	}
+}
+
 func TestLoadWithEnvVars(t *testing.T) {
 	// Save original env vars
 	originalVars := make(map[string]string)
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
@@ -604,6 +658,10 @@ func TestLoadWithEnvVars(t *testing.T) {
 	os.Setenv("REDIS_DB", "2")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("REDIS_FAIL_OPEN", "true")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("CLICK_EVENT_RETENTION", "720h")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("CLICK_EVENT_CLEANUP_INTERVAL", "30m")
 
 	// Load config - this should pick up environment variables
 	config, err := Load()
@@ -625,6 +683,8 @@ func TestLoadWithEnvVars(t *testing.T) {
 	assert.Equal(t, "redis-pass", config.Redis.Password)
 	assert.Equal(t, 2, config.Redis.DB)
 	assert.True(t, config.Redis.FailOpen)
+	assert.Equal(t, 30*24*time.Hour, config.Analytics.ClickEventRetention)
+	assert.Equal(t, 30*time.Minute, config.Analytics.CleanupInterval)
 
 	// Note: DATABASE_URL parsing only fills empty fields, so we test the DatabaseURL() method instead
 	expectedURL := "postgres://envuser:envpass@envhost:5433/envdb?sslmode=require"
@@ -633,7 +693,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear environment variables that might interfere
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "DB_HOST"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST"}
 	originalVars := make(map[string]string)
 
 	for _, envVar := range envVars {
@@ -688,6 +748,8 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "localhost", config.Redis.Host)
 	assert.Equal(t, 6379, config.Redis.Port)
 	assert.False(t, config.Redis.FailOpen)
+	assert.Equal(t, 90*24*time.Hour, config.Analytics.ClickEventRetention)
+	assert.Equal(t, time.Hour, config.Analytics.CleanupInterval)
 
 	assert.Equal(t, "info", config.Log.Level)
 	assert.Equal(t, "json", config.Log.Format)

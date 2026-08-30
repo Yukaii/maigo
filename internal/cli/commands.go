@@ -17,7 +17,9 @@ import (
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/database/models"
+	"github.com/yukaii/maigo/internal/database/repository"
 	"github.com/yukaii/maigo/internal/logger"
+	"github.com/yukaii/maigo/internal/maintenance"
 	"github.com/yukaii/maigo/internal/oauth"
 	"github.com/yukaii/maigo/internal/server"
 )
@@ -382,6 +384,24 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 		if err := httpServer.Shutdown(); err != nil {
 			log.Error("Failed to shut down HTTP server dependencies", "error", err)
 		}
+	}()
+
+	retentionWorker := maintenance.NewClickRetentionWorker(
+		repository.NewURLRepository(db),
+		cfg.Analytics.ClickEventRetention,
+		cfg.Analytics.CleanupInterval,
+		log,
+		httpServer.Metrics(),
+	)
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		retentionWorker.Run(cleanupCtx)
+	}()
+	defer func() {
+		cleanupCancel()
+		<-cleanupDone
 	}()
 
 	// Create HTTP server instance

@@ -94,6 +94,9 @@ REDIS_PORT=6379
 REDIS_PASSWORD=<redis-password>
 REDIS_DB=0
 REDIS_FAIL_OPEN=false
+
+CLICK_EVENT_RETENTION=2160h       # 90 days; Go duration
+CLICK_EVENT_CLEANUP_INTERVAL=1h
 ~~~
 
 OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET, and OAUTH2_REDIRECT_URI describe the
@@ -200,6 +203,13 @@ The /health endpoint is liveness-only; /health/ready also checks the database.
 Monitor both, plus container restarts, database disk usage, backup success, and
 5xx rates.
 
+The server runs click-event retention cleanup in the server process. Set
+`CLICK_EVENT_RETENTION` and `CLICK_EVENT_CLEANUP_INTERVAL` explicitly for the
+deployment’s data-retention policy. Cleanup is batched and safe to run from
+multiple replicas, while lifetime URL hit totals are preserved. The
+`/metrics` endpoint exposes process-local counters; keep it behind a private
+network path or an authenticated reverse-proxy route and scrape it externally.
+
 For horizontal scaling, enable the Redis limiter or put an equivalent policy
 at the edge, and decide how refresh sessions should work across devices. The
 current schema intentionally permits one active refresh session per user.
@@ -213,4 +223,6 @@ current schema intentionally permits one active refresh session per user.
 - [ ] Restrict the application port and database port at the network layer.
 - [ ] Configure automated backups and perform a restore drill.
 - [ ] Configure log collection and alerting for readiness failures.
+- [ ] Set click-event retention and scrape `/metrics` with alerts for tracking
+      or retention failures.
 - [ ] Read docs/STATUS.md and accept its limitations.

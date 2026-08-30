@@ -75,6 +75,10 @@ services:
       REDIS_DB: ${REDIS_DB:-0}
       REDIS_FAIL_OPEN: ${REDIS_FAIL_OPEN:-false}
 
+      # Click-event analytics retention
+      CLICK_EVENT_RETENTION: ${CLICK_EVENT_RETENTION:-2160h}
+      CLICK_EVENT_CLEANUP_INTERVAL: ${CLICK_EVENT_CLEANUP_INTERVAL:-1h}
+
       # Short Code Configuration
       SHORT_CODE_LENGTH: ${SHORT_CODE_LENGTH:-6}
     ports:

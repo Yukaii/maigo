@@ -93,6 +93,7 @@ timeline buckets.
 
 - `GET /health` — liveness.
 - `GET /health/ready` — liveness plus PostgreSQL and configured Redis readiness.
+- `GET /metrics` — Prometheus operational counters; restrict it at the network edge.
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login` — JSON auth helpers.
 - `POST /api/v1/auth/token` — JSON refresh compatibility endpoint.
 - `POST /api/v1/auth/logout` — revoke the current user’s refresh session.
@@ -142,9 +143,10 @@ Then visit <http://localhost:8081>.
 
 ## Current limitations
 
-Click events currently have no retention policy. Configure HTTPS, Redis or an
-edge limiter for horizontal scale, and a real secret manager for any
-deployment beyond local development. See
+Click events are retained for 90 days by default and cleaned up hourly. Set
+`CLICK_EVENT_RETENTION=0` to disable cleanup, which is not recommended in
+production. Configure HTTPS, Redis or an edge limiter for horizontal scale,
+and a real secret manager for any deployment beyond local development. See
 [`docs/STATUS.md`](../docs/STATUS.md) for the fuller audit and next steps.
 
 ## License

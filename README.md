@@ -69,6 +69,7 @@ Health:
 
 - `GET /health` — liveness check.
 - `GET /health/ready` — liveness plus database connectivity.
+- `GET /metrics` — process-local Prometheus operational counters; keep private.
 
 Authentication:
 
@@ -91,6 +92,10 @@ URL management:
 
 See [`api/README.md`](api/README.md) and [`api/openapi.yaml`](api/openapi.yaml)
 for request and response examples.
+
+Click-event cleanup keeps 90 days by default (`CLICK_EVENT_RETENTION=2160h`)
+and runs hourly. Set `CLICK_EVENT_RETENTION=0` to disable cleanup; this is not
+recommended for production.
 
 ## Development commands
 

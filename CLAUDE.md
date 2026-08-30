@@ -90,6 +90,7 @@ The authoritative API reference is [`api/openapi.yaml`](api/openapi.yaml),
 with usage notes in [`api/README.md`](api/README.md). The main routes are:
 
 - `GET /health` and `GET /health/ready`
+- `GET /metrics` for process-local Prometheus counters
 - `GET /{code}` for public redirects
 - `POST /api/v1/auth/register`, `/login`, `/refresh`, and `/logout`
 - `POST /api/v1/urls`, `GET /api/v1/user/urls`, and
@@ -106,11 +107,14 @@ registered localhost callback.
 
 Keep the following limitations visible in code and documentation:
 
-- statistics currently return one aggregate timeline point, not click events;
+- statistics use persisted click events grouped into UTC day buckets;
 - URL-create rate limiting is process-local and global;
 - the current session schema supports one refresh session per user;
 - access JWTs remain valid until expiry after logout;
-- redirect hit increments are asynchronous;
+- click-event failures are logged and counted, but not retried through a durable
+  outbox;
+- metrics are process-local and reset on restart;
+- click-event cleanup is configurable and disabled when retention is zero;
 - default CORS and development secrets require hardening before deployment.
 
 When changing behavior, update the OpenAPI document and integration coverage in

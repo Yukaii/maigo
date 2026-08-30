@@ -15,13 +15,14 @@ import (
 
 // Config holds all configuration for our application
 type Config struct {
-	Database DatabaseConfig `mapstructure:"database"`
-	Server   ServerConfig   `mapstructure:"server"`
-	OAuth2   OAuth2Config   `mapstructure:"oauth2"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	App      AppConfig      `mapstructure:"app"`
-	Log      LogConfig      `mapstructure:"log"`
-	Redis    RedisConfig    `mapstructure:"redis"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Server    ServerConfig    `mapstructure:"server"`
+	OAuth2    OAuth2Config    `mapstructure:"oauth2"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
+	App       AppConfig       `mapstructure:"app"`
+	Log       LogConfig       `mapstructure:"log"`
+	Redis     RedisConfig     `mapstructure:"redis"`
+	Analytics AnalyticsConfig `mapstructure:"analytics"`
 }
 
 // DatabaseConfig holds database configuration
@@ -98,6 +99,12 @@ type RedisConfig struct {
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
 	FailOpen bool   `mapstructure:"fail_open"`
+}
+
+// AnalyticsConfig controls click-event retention and cleanup scheduling.
+type AnalyticsConfig struct {
+	ClickEventRetention time.Duration `mapstructure:"click_event_retention"`
+	CleanupInterval     time.Duration `mapstructure:"cleanup_interval"`
 }
 
 // Load loads configuration from various sources
@@ -191,6 +198,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.db", 0)
 	v.SetDefault("redis.fail_open", false)
 
+	// Analytics configuration. A zero retention period disables cleanup; the
+	// default keeps 90 days of event-level analytics.
+	v.SetDefault("analytics.click_event_retention", "2160h")
+	v.SetDefault("analytics.cleanup_interval", "1h")
+
 	// App defaults
 	v.SetDefault("app.name", "Maigo")
 	v.SetDefault("app.environment", "development")
@@ -248,6 +260,10 @@ func bindEnvVars(v *viper.Viper) {
 		"REDIS_DB":        "redis.db",
 		"REDIS_FAIL_OPEN": "redis.fail_open",
 
+		// Analytics configuration
+		"CLICK_EVENT_RETENTION":        "analytics.click_event_retention",
+		"CLICK_EVENT_CLEANUP_INTERVAL": "analytics.cleanup_interval",
+
 		// Application configuration
 		"APP_ENV":                  "app.environment",
 		"BASE_DOMAIN":              "app.base_domain",
@@ -286,6 +302,9 @@ func validateConfig(cfg *Config) error {
 		return err
 	}
 	if err := validateRedisConfig(cfg.Redis); err != nil {
+		return err
+	}
+	if err := validateAnalyticsConfig(cfg.Analytics); err != nil {
 		return err
 	}
 	if err := validateCORSConfig(&cfg.App); err != nil {
@@ -402,6 +421,20 @@ func validateCORSConfig(app *AppConfig) error {
 		if !app.Debug && origin == "*" {
 			return fmt.Errorf("wildcard CORS origin is not allowed with debug disabled")
 		}
+	}
+
+	return nil
+}
+
+func validateAnalyticsConfig(analytics AnalyticsConfig) error {
+	if analytics.ClickEventRetention < 0 {
+		return fmt.Errorf("click event retention cannot be negative")
+	}
+	if analytics.CleanupInterval < 0 {
+		return fmt.Errorf("click event cleanup interval cannot be negative")
+	}
+	if analytics.ClickEventRetention > 0 && analytics.CleanupInterval == 0 {
+		return fmt.Errorf("click event cleanup interval is required when retention is enabled")
 	}
 
 	return nil
