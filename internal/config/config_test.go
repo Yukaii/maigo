@@ -663,6 +663,11 @@ func TestValidateConfigJWTKeyRingSettings(t *testing.T) {
 			jwt:  JWTConfig{ActiveKeyID: "primary", Keys: validKeys},
 		},
 		{
+			name:          "rejects negative session cleanup interval",
+			jwt:           JWTConfig{Secret: "legacy-secret", SessionCleanupInterval: -time.Minute},
+			errorContains: "session cleanup interval cannot be negative",
+		},
+		{
 			name:          "requires active key ID",
 			jwt:           JWTConfig{Keys: validKeys},
 			errorContains: "active key ID is required",
@@ -709,6 +714,7 @@ func TestLoadJWTKeyRingFromConfigFile(t *testing.T) {
 	t.Setenv("JWT_SECRET", "")
 	t.Setenv("JWT_ACTIVE_KEY_ID", "")
 	t.Setenv("JWT_KEYS", "")
+	t.Setenv("SESSION_CLEANUP_INTERVAL", "")
 	configPath := filepath.Join(t.TempDir(), "maigo.yaml")
 	configYAML := []byte(`jwt:
   active_key_id: primary-2026
@@ -733,7 +739,7 @@ func TestLoadJWTKeyRingFromConfigFile(t *testing.T) {
 func TestLoadWithEnvVars(t *testing.T) {
 	// Save original env vars
 	originalVars := make(map[string]string)
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "JWT_ACTIVE_KEY_ID", "JWT_KEYS", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "JWT_ACTIVE_KEY_ID", "JWT_KEYS", "SESSION_CLEANUP_INTERVAL", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
@@ -765,6 +771,8 @@ func TestLoadWithEnvVars(t *testing.T) {
 	os.Setenv("JWT_ACTIVE_KEY_ID", "primary-2026")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("JWT_KEYS", "primary-2026=env-primary-secret,primary-2025=env-previous-secret")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("SESSION_CLEANUP_INTERVAL", "45m")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("DEBUG", "true")
 	//nolint:errcheck // test setup doesn't need error checking
@@ -809,6 +817,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 		{ID: "primary-2026", Secret: "env-primary-secret"},
 		{ID: "primary-2025", Secret: "env-previous-secret"},
 	}, config.JWT.Keys)
+	assert.Equal(t, 45*time.Minute, config.JWT.SessionCleanupInterval)
 	assert.True(t, config.App.Debug)
 	assert.Equal(t, "test", config.App.Environment)
 	assert.Equal(t, "10.0.0.0/8", config.App.TrustedProxies)
@@ -831,7 +840,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear environment variables that might interfere
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "JWT_ACTIVE_KEY_ID", "JWT_KEYS", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "JWT_ACTIVE_KEY_ID", "JWT_KEYS", "SESSION_CLEANUP_INTERVAL", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST"}
 	originalVars := make(map[string]string)
 
 	for _, envVar := range envVars {
@@ -871,6 +880,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Empty(t, config.JWT.ActiveKeyID)
 	assert.Empty(t, config.JWT.Keys)
 	assert.Equal(t, 24*time.Hour, config.JWT.Expiration)
+	assert.Equal(t, time.Hour, config.JWT.SessionCleanupInterval)
 
 	assert.Equal(t, "Maigo", config.App.Name)
 	assert.Equal(t, "development", config.App.Environment)

@@ -80,6 +80,7 @@ BASE_DOMAIN=short.example.com
 APP_TLS=true              # only when HTTPS is provided at the public edge
 JWT_SECRET=<long-random-secret>
 JWT_EXPIRATION=24h
+SESSION_CLEANUP_INTERVAL=1h  # set to 0 only with an external cleanup policy
 # Or use a rotating key ring. For an existing deployment, keep the old
 # JWT_SECRET during the migration window; omit it for a fresh key-ring setup:
 # JWT_ACTIVE_KEY_ID=primary-2026
@@ -226,8 +227,12 @@ multiple replicas, while lifetime URL hit totals are preserved. The
 network path or an authenticated reverse-proxy route and scrape it externally.
 
 For horizontal scaling, enable the Redis limiter or put an equivalent policy
-at the edge, and decide how refresh sessions should work across devices. The
-current schema intentionally permits one active refresh session per user.
+at the edge. Refresh sessions are stored per login/client, so multiple devices
+can remain signed in. The scheduled worker deletes expired session rows in
+batches and is safe to run from multiple replicas; configure its cadence with
+`SESSION_CLEANUP_INTERVAL` (the production default is one hour). The JSON
+logout endpoint is a global logout for the user, while OAuth token revocation
+remains token-specific.
 
 ## Pre-exposure checklist
 
@@ -240,4 +245,6 @@ current schema intentionally permits one active refresh session per user.
 - [ ] Configure log collection and alerting for readiness failures.
 - [ ] Set click-event retention and scrape `/metrics` with alerts for tracking
       or retention failures.
+- [ ] Keep refresh-session cleanup enabled and alert on cleanup failures in
+      `/metrics`.
 - [ ] Read docs/STATUS.md and accept its limitations.

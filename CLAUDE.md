@@ -109,7 +109,9 @@ Keep the following limitations visible in code and documentation:
 
 - statistics use persisted click events grouped into UTC day buckets;
 - URL-create rate limiting is process-local and global;
-- the current session schema supports one refresh session per user;
+- refresh sessions are stored per login/client, and JSON logout revokes all
+  sessions for the authenticated user;
+- expired refresh sessions are removed by the scheduled cleanup worker;
 - access JWTs remain valid until expiry after logout;
 - JWT signing uses a legacy single secret by default, with an optional HMAC
   key ring and active `kid` for rotation;

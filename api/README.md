@@ -46,6 +46,11 @@ longest token lifetime they signed has elapsed. `JWT_SECRET` remains available
 for legacy single-key deployments and migration of tokens without a key ID;
 remove it only after those legacy tokens have expired.
 
+Each login or OAuth authorization flow creates an independent refresh session,
+so multiple devices can remain signed in. Expired sessions are cleaned hourly
+by default (`SESSION_CLEANUP_INTERVAL=1h`), and the JSON logout endpoint
+revokes all refresh sessions for the authenticated user.
+
 ## URL operations
 
 Create a URL:
@@ -102,7 +107,7 @@ timeline buckets.
 - `GET /metrics` — Prometheus operational counters; restrict it at the network edge.
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login` — JSON auth helpers.
 - `POST /api/v1/auth/token` — JSON refresh compatibility endpoint.
-- `POST /api/v1/auth/logout` — revoke the current user’s refresh session.
+- `POST /api/v1/auth/logout` — revoke all refresh sessions for the current user.
 - `GET|POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` — OAuth.
 - `POST /api/v1/urls` — authenticated creation.
 - `GET /api/v1/user/urls` and `GET /api/v1/user/profile` — authenticated user data.

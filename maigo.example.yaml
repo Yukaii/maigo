@@ -37,6 +37,8 @@ oauth2:
 jwt:
   secret: dev_jwt_secret_change_in_production
   expiration: 24h
+  # Set to 0 to disable scheduled expired-session cleanup.
+  session_cleanup_interval: 1h
   # Rotation mode:
   # active_key_id: primary-2026
   # keys:

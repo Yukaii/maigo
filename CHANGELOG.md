@@ -18,6 +18,8 @@ All notable changes to Maigo will be documented here. The format follows
   operational counters for redirect and cleanup failures.
 - Added rotating HMAC JWT key-ring support with `kid` headers, retained-key
   verification, and legacy token compatibility.
+- Added multi-device refresh sessions, scheduled expired-session cleanup, and
+  Prometheus counters for cleanup outcomes.
 
 ### Added
 
@@ -38,6 +40,8 @@ All notable changes to Maigo will be documented here. The format follows
 - Documented retention settings and private metrics scraping in the deployment
   and API guides.
 - Documented the JWT key-ring rotation sequence and its HMAC/JWKS boundary.
+- Documented multi-device sessions, global JSON logout, and session cleanup
+  operations.
 
 ### Fixed
 

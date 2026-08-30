@@ -423,10 +423,20 @@ func (suite *IntegrationTestSuite) TestAuthenticationAndTokenLifecycle() {
 	require.Equal(suite.T(), http.StatusCreated, registerResp.Code)
 
 	var registration struct {
+		User struct {
+			ID int64 `json:"id"`
+		} `json:"user"`
 		Tokens models.TokenResponse `json:"tokens"`
 	}
 	require.NoError(suite.T(), json.Unmarshal(registerResp.Body.Bytes(), &registration))
+	require.NotZero(suite.T(), registration.User.ID)
 	require.NotEmpty(suite.T(), registration.Tokens.RefreshToken)
+
+	var sessionCount int64
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE user_id = $1", registration.User.ID).Scan(&sessionCount)
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), int64(1), sessionCount)
 
 	duplicateBody, err := json.Marshal(models.CreateUserRequest{
 		Username: username,
@@ -461,6 +471,10 @@ func (suite *IntegrationTestSuite) TestAuthenticationAndTokenLifecycle() {
 	var loginTokens models.TokenResponse
 	require.NoError(suite.T(), json.Unmarshal(loginResp.Body.Bytes(), &loginTokens))
 	require.NotEmpty(suite.T(), loginTokens.AccessToken)
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE user_id = $1", registration.User.ID).Scan(&sessionCount)
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), int64(2), sessionCount, "a second login should keep the first device session")
 
 	refreshBody, err := json.Marshal(models.TokenResponse{RefreshToken: loginTokens.RefreshToken})
 	require.NoError(suite.T(), err)
@@ -474,6 +488,10 @@ func (suite *IntegrationTestSuite) TestAuthenticationAndTokenLifecycle() {
 	require.NoError(suite.T(), json.Unmarshal(refreshResp.Body.Bytes(), &refreshedTokens))
 	require.NotEmpty(suite.T(), refreshedTokens.RefreshToken)
 	assert.NotEqual(suite.T(), loginTokens.RefreshToken, refreshedTokens.RefreshToken)
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE user_id = $1", registration.User.ID).Scan(&sessionCount)
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), int64(2), sessionCount, "rotation should replace one session without affecting the other device")
 
 	// The old refresh token was consumed during rotation.
 	replayResp := httptest.NewRecorder()
@@ -487,6 +505,10 @@ func (suite *IntegrationTestSuite) TestAuthenticationAndTokenLifecycle() {
 	logoutResp := httptest.NewRecorder()
 	suite.server.ServeHTTP(logoutResp, logoutReq)
 	require.Equal(suite.T(), http.StatusOK, logoutResp.Code)
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE user_id = $1", registration.User.ID).Scan(&sessionCount)
+	require.NoError(suite.T(), err)
+	assert.Zero(suite.T(), sessionCount, "JSON logout should revoke every device session")
 
 	latestRefreshBody, err := json.Marshal(models.TokenResponse{RefreshToken: refreshedTokens.RefreshToken})
 	require.NoError(suite.T(), err)
@@ -835,6 +857,49 @@ func (suite *IntegrationTestSuite) TestClickEventRetentionCleanup() {
 	deletedEvents, err := metricValue(telemetry.RenderPrometheus(), "maigo_click_events_deleted_total")
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), uint64(1), deletedEvents)
+}
+
+// TestSessionCleanup verifies that the real PostgreSQL repository removes only
+// expired refresh sessions and reports the deletion through worker metrics.
+func (suite *IntegrationTestSuite) TestSessionCleanup() {
+	now := time.Now().UTC()
+	_, err := suite.db.Exec(context.Background(), `
+		INSERT INTO sessions (id, user_id, refresh_token, expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5), ($6, $2, $7, $8, $5, $5)`,
+		"expired-session", suite.testUser.ID, "expired-hash", now.Add(-time.Hour), now,
+		"active-session", "active-hash", now.Add(time.Hour))
+	require.NoError(suite.T(), err)
+	_, err = suite.db.Exec(context.Background(), `
+		INSERT INTO sessions (id, user_id, refresh_token, expires_at, created_at, updated_at)
+		SELECT 'expired-batch-' || generate_series::text, $1, 'expired-batch-hash', $2, $2, $2
+		FROM generate_series(1, 1001)`, suite.testUser.ID, now.Add(-2*time.Hour))
+	require.NoError(suite.T(), err)
+
+	telemetry := metrics.New()
+	worker := maintenance.NewSessionCleanupWorker(
+		repository.NewSessionRepository(suite.db),
+		time.Hour,
+		suite.logger,
+		telemetry,
+	)
+	require.NoError(suite.T(), worker.RunOnce(context.Background()))
+
+	var expiredCount, batchedExpiredCount, activeCount int64
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE id = $1", "expired-session").Scan(&expiredCount)
+	require.NoError(suite.T(), err)
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE id LIKE 'expired-batch-%'").Scan(&batchedExpiredCount)
+	require.NoError(suite.T(), err)
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT COUNT(*) FROM sessions WHERE id = $1", "active-session").Scan(&activeCount)
+	require.NoError(suite.T(), err)
+
+	assert.Zero(suite.T(), expiredCount)
+	assert.Zero(suite.T(), batchedExpiredCount)
+	assert.Equal(suite.T(), int64(1), activeCount)
+	assert.Contains(suite.T(), telemetry.RenderPrometheus(), "maigo_session_cleanup_runs_total 1")
+	assert.Contains(suite.T(), telemetry.RenderPrometheus(), "maigo_sessions_deleted_total 1002")
 }
 
 // TestClickTrackingFailureIsObservable verifies that a click persistence

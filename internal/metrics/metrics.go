@@ -15,6 +15,9 @@ type Metrics struct {
 	clickRetentionRunsTotal       atomic.Uint64
 	clickRetentionFailuresTotal   atomic.Uint64
 	clickEventsDeletedTotal       atomic.Uint64
+	sessionCleanupRunsTotal       atomic.Uint64
+	sessionCleanupFailuresTotal   atomic.Uint64
+	sessionsDeletedTotal          atomic.Uint64
 }
 
 // New creates an empty metrics registry.
@@ -54,6 +57,24 @@ func (m *Metrics) AddClickEventsDeleted(count int64) {
 	}
 }
 
+// IncSessionCleanupRuns increments refresh-session cleanup attempts.
+func (m *Metrics) IncSessionCleanupRuns() {
+	m.sessionCleanupRunsTotal.Add(1)
+}
+
+// IncSessionCleanupFailures increments failed refresh-session cleanup
+// attempts.
+func (m *Metrics) IncSessionCleanupFailures() {
+	m.sessionCleanupFailuresTotal.Add(1)
+}
+
+// AddSessionsDeleted records sessions removed by expiration cleanup.
+func (m *Metrics) AddSessionsDeleted(count int64) {
+	if count > 0 {
+		m.sessionsDeletedTotal.Add(uint64(count))
+	}
+}
+
 // RenderPrometheus renders counters in the Prometheus text exposition format.
 func (m *Metrics) RenderPrometheus() string {
 	return fmt.Sprintf(`# HELP maigo_redirects_total Non-expired redirect attempts.
@@ -74,6 +95,15 @@ maigo_click_retention_failures_total %d
 # HELP maigo_click_events_deleted_total Click events deleted by retention cleanup.
 # TYPE maigo_click_events_deleted_total counter
 maigo_click_events_deleted_total %d
+# HELP maigo_session_cleanup_runs_total Refresh-session cleanup attempts.
+# TYPE maigo_session_cleanup_runs_total counter
+maigo_session_cleanup_runs_total %d
+# HELP maigo_session_cleanup_failures_total Refresh-session cleanup failures.
+# TYPE maigo_session_cleanup_failures_total counter
+maigo_session_cleanup_failures_total %d
+# HELP maigo_sessions_deleted_total Refresh sessions deleted by expiration cleanup.
+# TYPE maigo_sessions_deleted_total counter
+maigo_sessions_deleted_total %d
 `,
 		m.redirectsTotal.Load(),
 		m.clickEventsRecordedTotal.Load(),
@@ -81,5 +111,8 @@ maigo_click_events_deleted_total %d
 		m.clickRetentionRunsTotal.Load(),
 		m.clickRetentionFailuresTotal.Load(),
 		m.clickEventsDeletedTotal.Load(),
+		m.sessionCleanupRunsTotal.Load(),
+		m.sessionCleanupFailuresTotal.Load(),
+		m.sessionsDeletedTotal.Load(),
 	)
 }

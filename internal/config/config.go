@@ -67,8 +67,9 @@ type JWTConfig struct {
 	// configured.
 	ActiveKeyID string `mapstructure:"active_key_id"`
 	// Keys contains the active key and any retained verification keys.
-	Keys       []JWTKeyConfig `mapstructure:"keys"`
-	Expiration time.Duration  `mapstructure:"expiration"`
+	Keys                   []JWTKeyConfig `mapstructure:"keys"`
+	Expiration             time.Duration  `mapstructure:"expiration"`
+	SessionCleanupInterval time.Duration  `mapstructure:"session_cleanup_interval"`
 }
 
 // JWTKeyConfig describes one HMAC signing key in the rotation key ring.
@@ -210,6 +211,7 @@ func setDefaults(v *viper.Viper) {
 	// ring can omit the legacy secret entirely.
 	v.SetDefault("jwt.secret", "")
 	v.SetDefault("jwt.expiration", "24h")
+	v.SetDefault("jwt.session_cleanup_interval", "1h")
 
 	// Redis defaults
 	v.SetDefault("redis.enabled", false)
@@ -270,9 +272,10 @@ func bindEnvVars(v *viper.Viper) error {
 		"OAUTH2_REDIRECT_URI":  "oauth2.redirect_uri",
 
 		// JWT configuration
-		"JWT_SECRET":        "jwt.secret",
-		"JWT_ACTIVE_KEY_ID": "jwt.active_key_id",
-		"JWT_EXPIRATION":    "jwt.expiration",
+		"JWT_SECRET":               "jwt.secret",
+		"JWT_ACTIVE_KEY_ID":        "jwt.active_key_id",
+		"JWT_EXPIRATION":           "jwt.expiration",
+		"SESSION_CLEANUP_INTERVAL": "jwt.session_cleanup_interval",
 
 		// Redis configuration
 		"REDIS_ENABLED":   "redis.enabled",
@@ -420,6 +423,9 @@ func validateProductionConfig(cfg *Config) error {
 }
 
 func validateJWTConfig(jwtConfig JWTConfig) error {
+	if jwtConfig.SessionCleanupInterval < 0 {
+		return fmt.Errorf("session cleanup interval cannot be negative")
+	}
 	if len(jwtConfig.Keys) == 0 {
 		if strings.TrimSpace(jwtConfig.Secret) == "" {
 			return fmt.Errorf("jwt secret or key ring is required")

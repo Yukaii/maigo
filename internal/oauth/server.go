@@ -461,18 +461,14 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
 	}
 
-	// Keep refresh tokens stateful so logout and rotation have real effect. The
-	// current schema intentionally allows one active session per user, matching
-	// the CLI-oriented product model.
+	// Keep refresh tokens stateful so logout and rotation have real effect. Each
+	// login or authorization flow gets its own session, allowing multiple
+	// devices or clients to remain signed in independently.
 	if s.db != nil {
 		const query = `
 			INSERT INTO sessions (id, user_id, refresh_token, expires_at, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $5)
-			ON CONFLICT (user_id) DO UPDATE SET
-				id = EXCLUDED.id,
-				refresh_token = EXCLUDED.refresh_token,
-				expires_at = EXCLUDED.expires_at,
-				updated_at = EXCLUDED.updated_at`
+		`
 		if _, err := s.db.Exec(
 			ctx,
 			query,

@@ -83,7 +83,7 @@ Authentication:
 - `POST /api/v1/auth/register` — create an account and return tokens.
 - `POST /api/v1/auth/login` — log in with username or email.
 - `POST /api/v1/auth/token` — JSON refresh-token compatibility endpoint.
-- `POST /api/v1/auth/logout` — revoke the authenticated user’s refresh session.
+- `POST /api/v1/auth/logout` — revoke all refresh sessions for the authenticated user.
 - `GET|POST /oauth/authorize` — browser authorization and consent.
 - `POST /oauth/token` — OAuth authorization-code or refresh-token exchange.
 - `POST /oauth/revoke` — revoke a refresh token.
@@ -103,6 +103,12 @@ for request and response examples.
 Click-event cleanup keeps 90 days by default (`CLICK_EVENT_RETENTION=2160h`)
 and runs hourly. Set `CLICK_EVENT_RETENTION=0` to disable cleanup; this is not
 recommended for production.
+
+Each login or OAuth authorization flow gets its own refresh session, so users
+can stay signed in on multiple devices. Expired sessions are deleted hourly by
+default (`SESSION_CLEANUP_INTERVAL=1h`); set it to `0` only when an external
+cleanup policy is in place. The JSON logout endpoint revokes all of the user’s
+refresh sessions.
 
 ## Development commands
 

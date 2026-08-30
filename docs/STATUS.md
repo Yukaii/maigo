@@ -15,10 +15,11 @@ CLI/API use. It is not yet a production-ready hosted service.
 - `mise exec -- golangci-lint run --timeout=5m` passes.
 - The PostgreSQL integration suite passes against an isolated PostgreSQL 16
   container, including authentication, OAuth/PKCE, refresh rotation, logout,
-  hit tracking, click retention, concurrent URL creation, and expiration
-  checks.
+  multi-device sessions, refresh-session cleanup, hit tracking, click
+  retention, concurrent URL creation, and expiration checks.
 - Prometheus-format operational counters cover redirects, click persistence,
-  and retention cleanup; the metrics endpoint is available for scraping.
+  click retention, and refresh-session cleanup; the metrics endpoint is
+  available for scraping.
 - `mise exec -- goreleaser check` passes.
 - `Dockerfile.production` builds and the resulting image runs its CLI smoke
   command on the current host architecture.
@@ -48,6 +49,8 @@ CLI/API use. It is not yet a production-ready hosted service.
   and UTC day-bucketed URL statistics.
 - Added configurable click-event retention with batched cleanup, graceful
   server shutdown, and operational counters for tracking and cleanup failures.
+- Removed the one-session-per-user constraint, added multi-device refresh
+  sessions, scheduled expired-session cleanup, and cleanup outcome metrics.
 - Pinned the CI Go, goimports, and golangci-lint versions to the local mise
   toolchain.
 - Updated the README, deployment notes, API guide, and OpenAPI paths to match
@@ -65,8 +68,9 @@ CLI/API use. It is not yet a production-ready hosted service.
   enabled. With Redis disabled, the fallback is a bounded per-client
   in-process limiter and is not shared across replicas. Forwarded client-IP
   headers are ignored unless explicitly allowed by `TRUSTED_PROXIES`.
-- The current `sessions` schema permits one active refresh session per user.
-  Multi-device sessions would need a migration and a session-management model.
+- Refresh sessions are stored per login/client and expired rows are removed by
+  the scheduled cleanup worker. The JSON logout endpoint revokes all sessions
+  for a user; OAuth token revocation remains token-specific.
 - Access JWTs are stateless. Logout immediately revokes refresh sessions, but
   an already-issued access token remains valid until its configured expiry.
 - The rotating key ring is HMAC-based and configuration-distributed; it does
@@ -84,7 +88,8 @@ CLI/API use. It is not yet a production-ready hosted service.
   assumes a reverse proxy will provide HTTPS. These are deliberate prototype
   defaults, not a full security baseline.
 - There is no cleanup job for expired URLs, authorization codes, or old access
-  token records. Click-event cleanup is now covered by the retention worker.
+  token records; refresh-session cleanup and click-event cleanup are covered by
+  scheduled workers.
 
 ## Recommended next work
 
@@ -94,8 +99,8 @@ CLI/API use. It is not yet a production-ready hosted service.
    horizontally scaled deployments, and add per-user/IP policy tests.
 3. Add a managed secret distribution/control-plane integration for the HMAC
    key ring before operating many independent deployments.
-4. Decide whether multiple devices are supported, then migrate sessions away
-   from the one-row-per-user constraint.
+4. Add explicit session listing/device metadata and a user-facing per-device
+   management API if device-specific session management is required.
 5. Add HTTP integration coverage for malformed redirects, token algorithms,
    CORS policy, pagination bounds, and all documented error responses.
 6. Add OpenAPI validation to CI and include Redis-backed integration coverage

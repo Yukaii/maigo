@@ -393,14 +393,25 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 		log,
 		httpServer.Metrics(),
 	)
+	sessionCleanupWorker := maintenance.NewSessionCleanupWorker(
+		repository.NewSessionRepository(db),
+		cfg.JWT.SessionCleanupInterval,
+		log,
+		httpServer.Metrics(),
+	)
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
-	cleanupDone := make(chan struct{})
+	cleanupDone := make(chan struct{}, 2)
 	go func() {
-		defer close(cleanupDone)
+		defer func() { cleanupDone <- struct{}{} }()
 		retentionWorker.Run(cleanupCtx)
+	}()
+	go func() {
+		defer func() { cleanupDone <- struct{}{} }()
+		sessionCleanupWorker.Run(cleanupCtx)
 	}()
 	defer func() {
 		cleanupCancel()
+		<-cleanupDone
 		<-cleanupDone
 	}()
 
