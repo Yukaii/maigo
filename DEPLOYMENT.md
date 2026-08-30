@@ -1,463 +1,189 @@
-# Maigo Deployment Guide
+# Maigo deployment guide
 
-This guide covers deploying Maigo in production using Docker.
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Production Deployment](#production-deployment)
-- [Environment Configuration](#environment-configuration)
-- [Database Management](#database-management)
-- [Monitoring & Logging](#monitoring--logging)
-- [Backup & Recovery](#backup--recovery)
-- [Security Best Practices](#security-best-practices)
+Maigo is a working prototype. The image and Compose setup are useful for a
+production-like evaluation, but review the status document before exposing it
+to untrusted traffic. In particular, use HTTPS, real secret management, and a
+distributed edge rate limiter.
 
 ## Prerequisites
 
-- Docker 20.10+
-- Docker Compose 2.0+
-- At least 1GB RAM
-- PostgreSQL-compatible database (or use included Docker service)
+- Docker 20.10+ and Docker Compose v2
+- PostgreSQL 15+ (the included Compose service uses PostgreSQL 16)
+- At least 1 GB RAM for the local stack
 
-## Quick Start
+## Compose deployment
 
-### 1. Clone and Configure
+The tracked docker-compose.yml builds Dockerfile.production, starts PostgreSQL,
+and waits for the database health check before starting Maigo. Migrations run
+automatically when the application starts.
 
-```bash
-# Clone the repository
-git clone https://github.com/yukaii/maigo.git
-cd maigo
-
-# Copy environment template
+~~~bash
 cp .env.production.example .env.production
+# Edit .env.production: set a real DB_PASSWORD and JWT_SECRET at minimum.
 
-# Edit configuration
-vim .env.production
-```
-
-### 2. Generate Secrets
-
-```bash
-# Generate JWT secret (minimum 32 characters)
-openssl rand -hex 32
-
-# Generate database password
-openssl rand -base64 32
-
-# Generate Redis password
-openssl rand -base64 32
-```
-
-### 3. Start Services
-
-```bash
-# Start all services
-docker-compose --env-file .env.production up -d
-
-# Check status
-docker-compose ps
-
-# View logs
-docker-compose logs -f maigo
-```
-
-### 4. Verify Deployment
-
-```bash
-# Health check
+docker compose --env-file .env.production config --quiet
+docker compose --env-file .env.production up -d --build
+docker compose --env-file .env.production ps
 curl http://localhost:8080/health
+curl http://localhost:8080/health/ready
+~~~
 
-# Expected response:
-# {"status":"ok","service":"maigo","message":"Server is healthy and running"}
-```
+BASE_DOMAIN should be the public hostname without a trailing slash. Set
+APP_TLS=true only when the public endpoint is HTTPS (usually behind a reverse
+proxy); leave it false for a direct local HTTP deployment. The Compose Redis
+profile is not required and is not connected to the current server; the active
+URL-create limiter is process-local.
 
-## Production Deployment
+Stop the services while retaining database volumes:
 
-### Build Production Image
+~~~bash
+docker compose --env-file .env.production stop
+~~~
 
-```bash
-# Build the production Docker image
-docker build -f Dockerfile.production -t maigo:latest .
+docker compose down removes containers and networks. docker compose down -v
+also removes the PostgreSQL volume and is destructive.
 
-# Tag for registry
-docker tag maigo:latest your-registry.com/maigo:latest
+## Building the image directly
 
-# Push to registry
-docker push your-registry.com/maigo:latest
-```
+~~~bash
+docker build -f Dockerfile.production -t maigo:local .
+docker image inspect maigo:local --format '{{.Size}} bytes'
+~~~
 
-### Docker Compose Production Setup
+The production image runs as the non-root maigo user and includes the tracked
+maigo.example.yaml template. Runtime settings should come from environment
+variables or an explicitly mounted config file.
 
-```yaml
-# docker-compose.prod.yml
-version: '3.8'
+## Configuration
 
-services:
-  maigo:
-    image: your-registry.com/maigo:latest
-    restart: always
-    env_file:
-      - .env.production
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-    volumes:
-      - ./logs:/app/logs
-    networks:
-      - maigo-network
+The application accepts either DATABASE_URL or the individual DB_* variables.
+Compose passes individual database variables so passwords containing URL
+punctuation are not accidentally mis-parsed. Common deployment settings:
 
-  postgres:
-    image: postgres:16-alpine
-    restart: always
-    env_file:
-      - .env.production
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
-    networks:
-      - maigo-network
-
-volumes:
-  postgres_data:
-
-networks:
-  maigo-network:
-    driver: bridge
-```
-
-Start production stack:
-
-```bash
-docker-compose -f docker-compose.prod.yml --env-file .env.production up -d
-```
-
-## Environment Configuration
-
-### Production Environment (.env.production)
-
-```bash
-# Database
+~~~bash
+DB_HOST=postgres
+DB_PORT=5432
 DB_NAME=maigo
 DB_USER=maigo
-DB_PASSWORD=<secure-password>
-DB_PORT=5432
+DB_PASSWORD=<strong-password>
+DB_SSL_MODE=disable       # use require with a TLS-enabled external database
 
-# Server
 PORT=8080
 HOST=0.0.0.0
-
-# OAuth & Security
-JWT_SECRET=<32-char-minimum-secret>
-OAUTH2_CLIENT_ID=maigo-cli
-OAUTH2_CLIENT_SECRET=<secure-secret>
-
-# Application
-GIN_MODE=release
+BASE_DOMAIN=short.example.com
+APP_TLS=true              # only when HTTPS is provided at the public edge
+JWT_SECRET=<long-random-secret>
+JWT_EXPIRATION=24h
+CORS_ENABLED=false
+DEBUG=false
 LOG_LEVEL=info
 LOG_FORMAT=json
+~~~
 
-# Feature Flags
-SHORT_CODE_LENGTH=6
-```
+OAUTH2_CLIENT_ID, OAUTH2_CLIENT_SECRET, and OAUTH2_REDIRECT_URI describe the
+bundled CLI client. The CLI uses PKCE and a localhost callback; this is not yet
+a general-purpose multi-client authorization service.
 
-### Staging Environment (.env.staging)
+Configuration precedence and all supported variables are documented in the
+README and maigo.example.yaml.
 
-Similar to production but with:
-- Different database
-- Debug logging enabled
-- Lower resource limits
+## Migrations
 
-### Development Environment (.env.development)
+Migrations are applied automatically during server startup. They can also be
+applied from a running Compose service:
 
-```bash
-GIN_MODE=debug
-LOG_LEVEL=debug
-LOG_FORMAT=text
-```
+~~~bash
+docker compose --env-file .env.production exec maigo /usr/local/bin/maigo migrate up
+docker compose --env-file .env.production exec maigo /usr/local/bin/maigo migrate status
+~~~
 
-## Database Management
+Take a backup before a rollback. The application intentionally does not expose
+a destructive migrate down command; use the pinned migrate tool with a
+reachable database URL:
 
-### Migrations
+~~~bash
+mise install
+mise exec -- migrate -path internal/database/migrations \
+  -database "$DATABASE_URL" down 1
+~~~
 
-Migrations run automatically on startup. To run manually:
+## Backups and restore
 
-```bash
-# Inside container
-docker-compose exec maigo /app/maigo migrate up
+The scripts use the fixed Compose database container name maigo-postgres.
+Export the production values before invoking them:
 
-# Roll back
-docker-compose exec maigo /app/maigo migrate down
-```
+~~~bash
+set -a
+. ./.env.production
+set +a
 
-### Database Backup
+./scripts/backup.sh
+./scripts/restore.sh backups/maigo_<timestamp>.sql.gz
+~~~
 
-```bash
-# Create backup
-docker-compose exec postgres pg_dump -U maigo maigo > backup_$(date +%Y%m%d_%H%M%S).sql
+backup.sh compresses the dump, writes a SHA-256 sidecar, and rotates files
+older than RETENTION_DAYS (30 by default). restore.sh verifies a sidecar when
+present, asks for confirmation, and creates a safety backup first. Test
+restores separately; a backup that has never been restored is not a recovery
+plan.
 
-# Automated backup (add to crontab)
-0 2 * * * docker-compose exec postgres pg_dump -U maigo maigo | gzip > /backups/maigo_$(date +\%Y\%m\%d).sql.gz
-```
+For an external database, use pg_dump/pg_restore with the database provider's
+credentials and set DATABASE_URL for the application.
 
-### Database Restore
+## Reverse proxy
 
-```bash
-# Restore from backup
-docker-compose exec -T postgres psql -U maigo maigo < backup.sql
+Terminate TLS at nginx, Caddy, or a managed load balancer and proxy to the HTTP
+service on port 8080. Forward the original host and scheme:
 
-# Or from gzipped backup
-gunzip -c backup.sql.gz | docker-compose exec -T postgres psql -U maigo maigo
-```
-
-## Monitoring & Logging
-
-### View Logs
-
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f maigo
-
-# Last 100 lines
-docker-compose logs --tail=100 maigo
-```
-
-### Structured JSON Logs
-
-In production mode, logs are output in JSON format:
-
-```json
-{
-  "time": "2025-10-02T10:30:00Z",
-  "level": "INFO",
-  "msg": "HTTP request",
-  "method": "POST",
-  "path": "/api/v1/urls",
-  "status": 201,
-  "latency": "15.2ms",
-  "client_ip": "192.168.1.1"
-}
-```
-
-### Health Monitoring
-
-```bash
-# Application health
-curl http://localhost:8080/health
-
-# Readiness check (includes database)
-curl http://localhost:8080/health/ready
-
-# Docker health status
-docker ps --format "table {{.Names}}\t{{.Status}}"
-```
-
-## Backup & Recovery
-
-### Automated Backup Script
-
-Create `scripts/backup.sh`:
-
-```bash
-#!/bin/bash
-BACKUP_DIR="/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-
-# Backup database
-docker-compose exec -T postgres pg_dump -U maigo maigo | gzip > "$BACKUP_DIR/maigo_$DATE.sql.gz"
-
-# Backup configuration
-tar -czf "$BACKUP_DIR/config_$DATE.tar.gz" config/ .env.production
-
-# Keep only last 30 days
-find "$BACKUP_DIR" -type f -mtime +30 -delete
-
-echo "Backup completed: $DATE"
-```
-
-Make executable:
-
-```bash
-chmod +x scripts/backup.sh
-```
-
-Add to crontab:
-
-```bash
-0 2 * * * /path/to/maigo/scripts/backup.sh >> /var/log/maigo-backup.log 2>&1
-```
-
-### Disaster Recovery
-
-1. **Stop services:**
-   ```bash
-   docker-compose down
-   ```
-
-2. **Restore database:**
-   ```bash
-   gunzip -c backup.sql.gz | docker-compose exec -T postgres psql -U maigo maigo
-   ```
-
-3. **Restore configuration:**
-   ```bash
-   tar -xzf config_backup.tar.gz
-   ```
-
-4. **Restart services:**
-   ```bash
-   docker-compose up -d
-   ```
-
-## Security Best Practices
-
-### 1. Secrets Management
-
-- ✅ Never commit secrets to version control
-- ✅ Use strong passwords (minimum 32 characters)
-- ✅ Rotate secrets regularly
-- ✅ Use environment variables or secret management tools
-
-### 2. Network Security
-
-```yaml
-# Use internal networks
-networks:
-  maigo-network:
-    driver: bridge
-    internal: false  # Set to true to isolate from internet
-```
-
-### 3. SSL/TLS
-
-Use a reverse proxy (nginx/caddy) for SSL termination:
-
-```nginx
+~~~nginx
 server {
-    listen 443 ssl http2;
-    server_name api.yourdomain.com;
+    listen 443 ssl;
+    server_name short.example.com;
 
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
+    ssl_certificate /etc/letsencrypt/live/short.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/short.example.com/privkey.pem;
 
     location / {
-        proxy_pass http://localhost:8080;
+        proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-```
+~~~
 
-### 4. Database Security
+The application does not provision certificates or implement proxy trust
+configuration itself. Keep the app port private when a reverse proxy is in
+front of it.
 
-```bash
-# Enable SSL for PostgreSQL
-DB_SSL_MODE=require
+## Operations
 
-# Use connection pooling limits
-MAX_CONNECTIONS=25
-MIN_CONNECTIONS=5
-```
+Useful checks:
 
-### 5. Container Security
+~~~bash
+docker compose --env-file .env.production logs -f maigo
+docker compose --env-file .env.production logs --tail=100 postgres
+docker compose --env-file .env.production exec maigo /usr/local/bin/maigo version
+docker compose --env-file .env.production exec postgres \
+  psql -U "$DB_USER" -d "$DB_NAME" -c 'SELECT 1'
+~~~
 
-- Run as non-root user (already configured)
-- Use minimal base images (Alpine)
-- Scan images for vulnerabilities:
-  ```bash
-  docker scan maigo:latest
-  ```
+The /health endpoint is liveness-only; /health/ready also checks the database.
+Monitor both, plus container restarts, database disk usage, backup success, and
+5xx rates.
 
-## Troubleshooting
+Do not horizontally scale the service without replacing the process-local
+limiter and deciding how refresh sessions should work across devices. The
+current schema intentionally permits one active refresh session per user.
 
-### Container Won't Start
+## Pre-exposure checklist
 
-```bash
-# Check logs
-docker-compose logs maigo
-
-# Verify environment variables
-docker-compose config
-
-# Check resource usage
-docker stats
-```
-
-### Database Connection Issues
-
-```bash
-# Test database connectivity
-docker-compose exec maigo wget -qO- http://localhost:8080/health/ready
-
-# Check PostgreSQL logs
-docker-compose logs postgres
-
-# Verify credentials
-docker-compose exec postgres psql -U maigo -d maigo -c "SELECT 1"
-```
-
-### Performance Issues
-
-```bash
-# Monitor resource usage
-docker stats
-
-# Check connection pool
-docker-compose logs maigo | grep "connection pool"
-
-# Increase resources if needed
-docker-compose up -d --scale maigo=2
-```
-
-## Scaling
-
-### Horizontal Scaling
-
-```bash
-# Scale to 3 instances
-docker-compose up -d --scale maigo=3
-```
-
-Use a load balancer (nginx/HAProxy) to distribute traffic.
-
-### Vertical Scaling
-
-Update `docker-compose.yml`:
-
-```yaml
-services:
-  maigo:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-```
-
-## Production Checklist
-
-- [ ] Generate secure secrets
-- [ ] Configure environment variables
-- [ ] Set up SSL/TLS termination
-- [ ] Configure firewall rules
-- [ ] Set up automated backups
-- [ ] Configure log rotation
-- [ ] Set up monitoring/alerting
-- [ ] Test disaster recovery
-- [ ] Document runbooks
-- [ ] Set up CI/CD pipeline
-
-## Support
-
-For issues and questions:
-- GitHub Issues: https://github.com/yukaii/maigo/issues
-- Documentation: https://github.com/yukaii/maigo/blob/main/README.md
+- [ ] Replace all example database and JWT secrets.
+- [ ] Set BASE_DOMAIN and APP_TLS for the public endpoint.
+- [ ] Put the service behind HTTPS and an edge/API rate limiter.
+- [ ] Set CORS_ENABLED=false unless a specific browser origin is needed.
+- [ ] Restrict the application port and database port at the network layer.
+- [ ] Configure automated backups and perform a restore drill.
+- [ ] Configure log collection and alerting for readiness failures.
+- [ ] Read docs/STATUS.md and accept its limitations.

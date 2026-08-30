@@ -2,6 +2,10 @@
 # Build stage
 FROM golang:1.23-alpine AS builder
 
+# BuildKit supplies these values for the target platform.
+ARG TARGETOS
+ARG TARGETARCH
+
 # Install build dependencies
 RUN apk add --no-cache git make gcc musl-dev
 
@@ -18,7 +22,7 @@ RUN go mod download
 COPY . .
 
 # Build the application with optimizations
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o maigo ./cmd/maigo
 
@@ -40,10 +44,13 @@ RUN addgroup -g 1000 maigo && \
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /build/maigo .
+COPY --from=builder /build/maigo /usr/local/bin/maigo
 
-# Copy configuration template (will be overridden by environment variables)
-COPY --from=builder /build/config/maigo.yaml ./config/maigo.yaml
+# Include the tracked configuration template for operators who want to mount or
+# copy it. Runtime configuration is supplied through environment variables or
+# an explicit --config path; there is no generated config/maigo.yaml in the
+# repository.
+COPY --from=builder /build/maigo.example.yaml ./maigo.example.yaml
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs && \
@@ -65,5 +72,5 @@ ENV GIN_MODE=release \
     LOG_FORMAT=json
 
 # Run the application
-ENTRYPOINT ["/app/maigo"]
+ENTRYPOINT ["/usr/local/bin/maigo"]
 CMD ["server"]

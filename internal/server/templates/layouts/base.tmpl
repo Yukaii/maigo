@@ -1,4 +1,4 @@
-{{define "layouts/base.tmpl"}}
+{{define "layouts/base-start"}}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,7 +8,9 @@
     {{template "styles/oauth.css" .}}
 </head>
 <body>
-    {{template "content" .}}
+{{end}}
+
+{{define "layouts/base-end"}}
 </body>
 </html>
 {{end}}

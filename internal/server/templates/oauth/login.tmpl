@@ -1,8 +1,10 @@
 {{define "oauth/login.tmpl"}}
-{{template "layouts/base.tmpl" .}}
+{{template "layouts/base-start" .}}
+{{template "oauth/login-content" .}}
+{{template "layouts/base-end" .}}
 {{end}}
 
-{{define "content"}}
+{{define "oauth/login-content"}}
     <div class="auth-box">
         <div class="header">
             <div class="header-icon lock-icon">🔒</div>

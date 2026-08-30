@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -26,6 +27,8 @@ const (
 	CodeVerifierMinLength = 43
 	// CodeVerifierMaxLength maximum length for code verifier
 	CodeVerifierMaxLength = 128
+
+	redirectSchemeHTTP = "http"
 )
 
 // GeneratePKCEParams generates PKCE parameters for OAuth 2.0 authorization code flow
@@ -184,13 +187,19 @@ func ValidateRedirectURI(redirectURI string) error {
 		return fmt.Errorf("redirect URI is required")
 	}
 
-	// Must be absolute URI
-	if !strings.HasPrefix(redirectURI, "http://") && !strings.HasPrefix(redirectURI, "https://") {
+	parsedURL, err := url.Parse(redirectURI)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Hostname() == "" {
 		return fmt.Errorf("redirect URI must be absolute (http:// or https://)")
+	}
+	if parsedURL.Scheme != redirectSchemeHTTP && parsedURL.Scheme != "https" {
+		return fmt.Errorf("redirect URI must be absolute and use http:// or https://")
+	}
+	if parsedURL.User != nil {
+		return fmt.Errorf("redirect URI must not contain userinfo")
 	}
 
 	// Should not contain fragment
-	if strings.Contains(redirectURI, "#") {
+	if parsedURL.Fragment != "" || strings.Contains(redirectURI, "#") {
 		return fmt.Errorf("redirect URI must not contain fragment")
 	}
 

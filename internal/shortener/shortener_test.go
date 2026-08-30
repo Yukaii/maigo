@@ -170,8 +170,9 @@ func TestEncoder_GenerateRandom(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			encoder := NewEncoder(tt.length)
 
-			// Generate multiple codes to test uniqueness
-			codes := make(map[string]bool)
+			// Generate multiple codes to verify the encoder's format contract.
+			// Random generation alone cannot guarantee uniqueness; that contract
+			// belongs to ShortenerService.GenerateShortCode, which checks storage.
 			iterations := 100
 			if tt.length <= 2 {
 				// For very short codes, use fewer iterations to reduce collision chance
@@ -188,11 +189,6 @@ func TestEncoder_GenerateRandom(t *testing.T) {
 					assert.Contains(t, base62Alphabet, string(char))
 				}
 
-				// For short codes, duplicates are expected due to limited space
-				if tt.length > 2 {
-					assert.False(t, codes[code], "Duplicate code generated: %s", code)
-				}
-				codes[code] = true
 			}
 		})
 	}
@@ -390,9 +386,10 @@ func TestSanitizeURL(t *testing.T) {
 			errorContains: "cannot be empty",
 		},
 		{
-			name:     "Whitespace only becomes https://",
-			url:      "   ",
-			expected: "https://",
+			name:          "Whitespace only",
+			url:           "   ",
+			expectedError: true,
+			errorContains: "cannot be empty",
 		},
 		{
 			name:          "Too long URL",

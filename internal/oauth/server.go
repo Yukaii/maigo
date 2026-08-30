@@ -3,6 +3,9 @@ package oauth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -10,7 +13,10 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database/models"
@@ -105,6 +111,14 @@ const (
 	GrantTypeRefreshToken      = "refresh_token"
 )
 
+const (
+	authorizationCodeLifetime = 10 * time.Minute
+	accessTokenLifetime       = time.Hour
+	refreshTokenLifetime      = 30 * 24 * time.Hour
+	accessTokenType           = "access"
+	refreshTokenType          = "refresh"
+)
+
 // OAuth 2.0 response types
 const (
 	ResponseTypeCode = "code"
@@ -129,88 +143,7 @@ func (s *Server) ProcessAuthorizationRequest(
 	ctx context.Context,
 	req *AuthorizationRequest,
 ) (*AuthorizeResponse, error) {
-	// Validate response type
-	if req.ResponseType != ResponseTypeCode {
-		return nil, &TokenError{
-			ErrorCode:        ErrorUnsupportedResponseType,
-			ErrorDescription: "Only 'code' response type is supported",
-		}
-	}
-
-	// Validate client
-	client, err := s.getClient(ctx, req.ClientID)
-	if err != nil {
-		return nil, &TokenError{
-			ErrorCode:        ErrorInvalidClient,
-			ErrorDescription: "Invalid client_id",
-		}
-	}
-
-	// Validate redirect URI
-	if !s.validateRedirectURI(client, req.RedirectURI) {
-		return nil, &TokenError{
-			ErrorCode:        ErrorInvalidRequest,
-			ErrorDescription: "Invalid redirect_uri",
-		}
-	}
-
-	// Validate PKCE parameters if present
-	if req.CodeChallenge != "" {
-		err = ValidateCodeChallenge(req.CodeChallenge)
-		if err != nil {
-			return nil, &TokenError{
-				ErrorCode:        ErrorInvalidRequest,
-				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
-			}
-		}
-
-		// Default to plain if method not specified
-		if req.CodeChallengeMethod == "" {
-			req.CodeChallengeMethod = PKCEMethodPlain
-		}
-
-		err = ValidateCodeChallengeMethod(req.CodeChallengeMethod)
-		if err != nil {
-			return nil, &TokenError{
-				ErrorCode:        ErrorInvalidRequest,
-				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
-			}
-		}
-	}
-
-	// Generate authorization code
-	authCode, err := GenerateAuthorizationCode()
-	if err != nil {
-		return nil, &TokenError{
-			ErrorCode:        ErrorServerError,
-			ErrorDescription: "Failed to generate authorization code",
-		}
-	}
-
-	// Store authorization code with PKCE parameters
-	expiresAt := time.Now().Add(10 * time.Minute) // 10 minute expiry
-	err = s.storeAuthorizationCode(ctx, &models.AuthorizationCode{
-		Code:                authCode,
-		ClientID:            req.ClientID,
-		RedirectURI:         req.RedirectURI,
-		Scope:               req.Scope,
-		CodeChallenge:       req.CodeChallenge,
-		CodeChallengeMethod: req.CodeChallengeMethod,
-		ExpiresAt:           expiresAt,
-		Used:                false,
-	})
-
-	if err != nil {
-		return nil, &TokenError{
-			ErrorCode:        ErrorServerError,
-			ErrorDescription: "Failed to store authorization code",
-		}
-	}
-
-	return &AuthorizeResponse{
-		Code:  authCode,
-		State: req.State,
-	}, nil
+	return s.processAuthorizationRequest(ctx, req, 0)
 }
 
 // ProcessAuthorizationRequestWithUser processes OAuth 2.0 authorization request with a specific user ID
@@ -219,53 +152,73 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 	req *AuthorizationRequest,
 	userID int64,
 ) (*AuthorizeResponse, error) {
-	// Validate response type
+	return s.processAuthorizationRequest(ctx, req, userID)
+}
+
+// ValidateAuthorizationRequest validates an authorization request without
+// issuing a code. It is used by the consent-denial path before redirecting to
+// a client-supplied URI.
+func (s *Server) ValidateAuthorizationRequest(ctx context.Context, req *AuthorizationRequest) error {
+	if req == nil {
+		return &TokenError{
+			ErrorCode:        ErrorInvalidRequest,
+			ErrorDescription: "Authorization request is required",
+		}
+	}
 	if req.ResponseType != ResponseTypeCode {
-		return nil, &TokenError{
+		return &TokenError{
 			ErrorCode:        ErrorUnsupportedResponseType,
 			ErrorDescription: "Only 'code' response type is supported",
 		}
 	}
 
-	// Validate client
 	client, err := s.getClient(ctx, req.ClientID)
 	if err != nil {
-		return nil, &TokenError{
-			ErrorCode:        ErrorInvalidClient,
-			ErrorDescription: "Invalid client_id",
+		return &TokenError{ErrorCode: ErrorInvalidClient, ErrorDescription: "Invalid client_id"}
+	}
+	if !s.validateRedirectURI(client, req.RedirectURI) {
+		return &TokenError{ErrorCode: ErrorInvalidRequest, ErrorDescription: "Invalid redirect_uri"}
+	}
+	if req.CodeChallenge == "" {
+		return &TokenError{ErrorCode: ErrorInvalidRequest, ErrorDescription: "code_challenge is required"}
+	}
+	if req.CodeChallengeMethod != PKCEMethodS256 {
+		return &TokenError{ErrorCode: ErrorInvalidRequest, ErrorDescription: "code_challenge_method must be S256"}
+	}
+	if err := ValidateCodeChallenge(req.CodeChallenge); err != nil {
+		return &TokenError{
+			ErrorCode:        ErrorInvalidRequest,
+			ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
 		}
 	}
 
-	// Validate redirect URI
-	if !s.validateRedirectURI(client, req.RedirectURI) {
+	return nil
+}
+
+// processAuthorizationRequest validates and stores an authorization request
+// for the authenticated user. Authorization codes must never be issued for a
+// guessed or implicit user ID.
+func (s *Server) processAuthorizationRequest(
+	ctx context.Context,
+	req *AuthorizationRequest,
+	userID int64,
+) (*AuthorizeResponse, error) {
+	if req == nil {
 		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
-			ErrorDescription: "Invalid redirect_uri",
+			ErrorDescription: "Authorization request is required",
 		}
 	}
 
-	// Validate PKCE parameters if present
-	if req.CodeChallenge != "" {
-		err = ValidateCodeChallenge(req.CodeChallenge)
-		if err != nil {
-			return nil, &TokenError{
-				ErrorCode:        ErrorInvalidRequest,
-				ErrorDescription: fmt.Sprintf("Invalid code_challenge: %v", err),
-			}
+	if userID <= 0 {
+		return nil, &TokenError{
+			ErrorCode:        ErrorInvalidRequest,
+			ErrorDescription: "Authenticated user is required",
 		}
+	}
 
-		// Default to plain if method not specified
-		if req.CodeChallengeMethod == "" {
-			req.CodeChallengeMethod = PKCEMethodPlain
-		}
-
-		err = ValidateCodeChallengeMethod(req.CodeChallengeMethod)
-		if err != nil {
-			return nil, &TokenError{
-				ErrorCode:        ErrorInvalidRequest,
-				ErrorDescription: fmt.Sprintf("Invalid code_challenge_method: %v", err),
-			}
-		}
+	if err := s.ValidateAuthorizationRequest(ctx, req); err != nil {
+		return nil, err
 	}
 
 	// Generate authorization code
@@ -278,7 +231,7 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 	}
 
 	// Store authorization code with PKCE parameters and the provided user ID
-	expiresAt := time.Now().Add(10 * time.Minute) // 10 minute expiry
+	expiresAt := time.Now().Add(authorizationCodeLifetime)
 	err = s.storeAuthorizationCodeWithUser(ctx, &models.AuthorizationCode{
 		Code:                authCode,
 		ClientID:            req.ClientID,
@@ -306,6 +259,13 @@ func (s *Server) ProcessAuthorizationRequestWithUser(
 
 // ProcessTokenRequest processes OAuth 2.0 token request with PKCE verification
 func (s *Server) ProcessTokenRequest(ctx context.Context, req *TokenRequest) (*TokenPair, error) {
+	if req == nil {
+		return nil, &TokenError{
+			ErrorCode:        ErrorInvalidRequest,
+			ErrorDescription: "Token request is required",
+		}
+	}
+
 	switch req.GrantType {
 	case GrantTypeAuthorizationCode:
 		return s.processAuthorizationCodeGrant(ctx, req)
@@ -412,11 +372,12 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 		}
 	}
 
-	// Mark authorization code as used
+	// Mark authorization code as used atomically. This closes the replay race
+	// where two requests could both read an unused code before either update.
 	if markErr := s.markAuthorizationCodeUsed(ctx, req.Code); markErr != nil {
 		return nil, &TokenError{
-			ErrorCode:        ErrorServerError,
-			ErrorDescription: "Failed to mark authorization code as used",
+			ErrorCode:        ErrorInvalidGrant,
+			ErrorDescription: "Authorization code already used or expired",
 		}
 	}
 
@@ -435,14 +396,34 @@ func (s *Server) processAuthorizationCodeGrant(ctx context.Context, req *TokenRe
 
 // GenerateTokenPair generates access and refresh token pair
 func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*TokenPair, error) {
+	if user == nil || user.ID <= 0 {
+		return nil, fmt.Errorf("cannot issue tokens for an invalid user")
+	}
+	if s.config == nil || s.config.JWT.Secret == "" {
+		return nil, fmt.Errorf("JWT secret is not configured")
+	}
+
+	now := time.Now()
+	accessLifetime := s.config.JWT.Expiration
+	if accessLifetime <= 0 {
+		accessLifetime = accessTokenLifetime
+	}
+	refreshID := uuid.NewString()
+	accessID := uuid.NewString()
+	accessExpiresAt := now.Add(accessLifetime)
+	refreshExpiresAt := now.Add(refreshTokenLifetime)
+
 	// Generate access token
 	accessClaims := jwt.MapClaims{
-		"user_id": user.ID,
-		"email":   user.Email,
-		"exp":     time.Now().Add(time.Hour).Unix(), // 1 hour expiration
-		"iat":     time.Now().Unix(),
-		"iss":     "maigo-oauth2",
-		"aud":     "maigo-api",
+		"user_id":  user.ID,
+		"username": user.Username,
+		"email":    user.Email,
+		"type":     accessTokenType,
+		"jti":      accessID,
+		"exp":      accessExpiresAt.Unix(),
+		"iat":      now.Unix(),
+		"iss":      "maigo-oauth2",
+		"aud":      "maigo-api",
 	}
 
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
@@ -454,10 +435,11 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 	// Generate refresh token
 	refreshClaims := jwt.MapClaims{
 		"user_id": user.ID,
-		"exp":     time.Now().Add(time.Hour * 24 * 30).Unix(), // 30 days expiration
-		"iat":     time.Now().Unix(),
+		"type":    refreshTokenType,
+		"jti":     refreshID,
+		"exp":     refreshExpiresAt.Unix(),
+		"iat":     now.Unix(),
 		"iss":     "maigo-oauth2",
-		"type":    "refresh",
 	}
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
@@ -466,23 +448,52 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
 	}
 
+	// Keep refresh tokens stateful so logout and rotation have real effect. The
+	// current schema intentionally allows one active session per user, matching
+	// the CLI-oriented product model.
+	if s.db != nil {
+		const query = `
+			INSERT INTO sessions (id, user_id, refresh_token, expires_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $5)
+			ON CONFLICT (user_id) DO UPDATE SET
+				id = EXCLUDED.id,
+				refresh_token = EXCLUDED.refresh_token,
+				expires_at = EXCLUDED.expires_at,
+				updated_at = EXCLUDED.updated_at`
+		if _, err := s.db.Exec(
+			ctx,
+			query,
+			refreshID,
+			user.ID,
+			hashToken(refreshTokenString),
+			refreshExpiresAt,
+			now,
+		); err != nil {
+			return nil, fmt.Errorf("failed to persist refresh session: %w", err)
+		}
+	}
+
+	expiresIn := int(accessLifetime / time.Second)
+	if expiresIn < 1 {
+		expiresIn = 1
+	}
+
 	return &TokenPair{
 		AccessToken:  accessTokenString,
 		TokenType:    "Bearer",
-		ExpiresIn:    3600, // 1 hour in seconds
+		ExpiresIn:    expiresIn,
 		RefreshToken: refreshTokenString,
 	}, nil
 }
 
 // RefreshAccessToken creates a new access token from a refresh token
 func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString string) (*TokenPair, error) {
-	// Parse and validate refresh token
-	token, err := jwt.Parse(refreshTokenString, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(s.config.JWT.Secret), nil
-	})
+	if refreshTokenString == "" {
+		return nil, &TokenError{ErrorCode: ErrorInvalidGrant, ErrorDescription: "Invalid refresh token"}
+	}
+
+	// Parse and validate refresh token using one exact signing algorithm.
+	token, err := s.parseSignedToken(refreshTokenString)
 
 	if err != nil {
 		return nil, &TokenError{
@@ -500,7 +511,7 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 	}
 
 	// Check if token type is refresh
-	if tokenType, tokenOk := claims["type"]; !tokenOk || tokenType != "refresh" {
+	if tokenType, tokenOk := claims["type"].(string); !tokenOk || tokenType != refreshTokenType {
 		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Token is not a refresh token",
@@ -508,14 +519,38 @@ func (s *Server) RefreshAccessToken(ctx context.Context, refreshTokenString stri
 	}
 
 	// Extract user ID
-	userIDFloat, ok := claims["user_id"].(float64)
-	if !ok {
+	userID, ok := claimInt64(claims["user_id"])
+	if !ok || userID <= 0 {
 		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid user ID in refresh token",
 		}
 	}
-	userID := int64(userIDFloat)
+
+	refreshID, ok := claims["jti"].(string)
+	if !ok || refreshID == "" {
+		return nil, &TokenError{
+			ErrorCode:        ErrorInvalidGrant,
+			ErrorDescription: "Invalid refresh token",
+		}
+	}
+
+	// Consume the current session atomically. A rotated refresh token cannot be
+	// replayed, including when two refresh requests arrive concurrently.
+	if s.db != nil {
+		var sessionUserID int64
+		const query = `
+			DELETE FROM sessions
+			WHERE id = $1 AND user_id = $2 AND refresh_token = $3 AND expires_at > NOW()
+			RETURNING user_id`
+		err = s.db.QueryRow(ctx, query, refreshID, userID, hashToken(refreshTokenString)).Scan(&sessionUserID)
+		if err != nil || sessionUserID != userID {
+			return nil, &TokenError{
+				ErrorCode:        ErrorInvalidGrant,
+				ErrorDescription: "Invalid or expired refresh token",
+			}
+		}
+	}
 
 	// Get user
 	user, err := s.getUserByID(ctx, userID)
@@ -539,13 +574,20 @@ func (s *Server) processRefreshTokenGrant(ctx context.Context, req *TokenRequest
 		}
 	}
 
+	if _, err := s.getClient(ctx, req.ClientID); err != nil {
+		return nil, &TokenError{
+			ErrorCode:        ErrorInvalidClient,
+			ErrorDescription: "Invalid client_id",
+		}
+	}
+
 	return s.RefreshAccessToken(ctx, req.RefreshToken)
 }
 
 // GetAuthorizationURL constructs OAuth 2.0 authorization URL with PKCE
 func (s *Server) GetAuthorizationURL(clientID, redirectURI, scope, state string, pkce *PKCEParams) (string, error) {
 	// Construct base URL from config
-	protocol := "http"
+	protocol := redirectSchemeHTTP
 	if s.config.App.TLS {
 		protocol = "https"
 	}
@@ -583,8 +625,9 @@ func (s *Server) AuthenticateUser(ctx context.Context, username, password string
 		}
 	}
 
-	// Verify password (assuming password is stored as hashed for now)
-	if user.PasswordHash != password {
+	// Passwords are stored as bcrypt hashes. Never compare or persist the raw
+	// password.
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidGrant,
 			ErrorDescription: "Invalid username or password",
@@ -597,24 +640,37 @@ func (s *Server) AuthenticateUser(ctx context.Context, username, password string
 
 // RegisterUser creates a new user account and returns the user
 func (s *Server) RegisterUser(ctx context.Context, username, email, password string) (*models.User, error) {
-	// Check if user already exists
-	existingUser, err := s.getUserByUsernameOrEmail(ctx, email)
+	// Check both unique fields before hashing or inserting the password.
+	var exists bool
+	err := s.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users WHERE username = $1 OR email = $2)`,
+		username, email,
+	).Scan(&exists)
 	if err != nil {
-		// Log error but continue - absence of user is expected for registration
-		s.logger.Debug("User lookup failed during registration", "error", err)
+		return nil, &TokenError{
+			ErrorCode:        ErrorServerError,
+			ErrorDescription: "Failed to check existing user",
+		}
 	}
-	if existingUser != nil {
+	if exists {
 		return nil, &TokenError{
 			ErrorCode:        ErrorInvalidRequest,
 			ErrorDescription: "User already exists",
 		}
 	}
 
-	// Create new user (in a real implementation, password should be hashed)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, &TokenError{
+			ErrorCode:        ErrorServerError,
+			ErrorDescription: "Failed to secure password",
+		}
+	}
+
 	user := &models.User{
 		Username:     username,
 		Email:        email,
-		PasswordHash: password, // Should be hashed in production!
+		PasswordHash: string(hashedPassword),
 	}
 
 	// Insert user into database
@@ -626,27 +682,96 @@ func (s *Server) RegisterUser(ctx context.Context, username, email, password str
 	err = s.db.QueryRow(ctx, query, user.Username, user.Email, user.PasswordHash).
 		Scan(&user.ID, &user.CreatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, &TokenError{
+				ErrorCode:        ErrorInvalidRequest,
+				ErrorDescription: "User already exists",
+			}
+		}
 		return nil, &TokenError{
 			ErrorCode:        ErrorServerError,
 			ErrorDescription: "Failed to create user",
 		}
 	}
+	user.PasswordHash = ""
 
 	return user, nil
 }
 
 // RevokeToken revokes all tokens for a user
 func (s *Server) RevokeToken(ctx context.Context, userID int64) error {
-	// In a production system, you would maintain a token blacklist or
-	// token revocation table. For now, this is a no-op since we're using
-	// stateless JWT tokens.
-	// You could:
-	// 1. Add tokens to a blacklist table
-	// 2. Change the user's token version/salt
-	// 3. Set token expiration in a cache
+	if userID <= 0 {
+		return fmt.Errorf("invalid user ID")
+	}
+	if s.db != nil {
+		if _, err := s.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
+			return fmt.Errorf("failed to revoke refresh sessions: %w", err)
+		}
+	}
 
-	s.logger.Info("Token revocation requested for user", "user_id", userID)
+	s.logger.Info("Refresh sessions revoked for user", "user_id", userID)
 	return nil
+}
+
+// RevokeTokenString revokes a refresh-token session. Per RFC 7009, malformed
+// or unknown tokens are treated as already revoked and do not reveal token
+// metadata to callers.
+func (s *Server) RevokeTokenString(ctx context.Context, tokenString string) error {
+	token, err := s.parseSignedToken(tokenString)
+	if err != nil || !token.Valid {
+		return nil
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil
+	}
+	userID, ok := claimInt64(claims["user_id"])
+	if !ok || userID <= 0 {
+		return nil
+	}
+
+	if s.db == nil {
+		return nil
+	}
+
+	if tokenType, tokenTypeOK := claims["type"].(string); tokenTypeOK && tokenType == refreshTokenType {
+		if refreshID, ok := claims["jti"].(string); ok && refreshID != "" {
+			_, err = s.db.Exec(ctx,
+				`DELETE FROM sessions WHERE id = $1 AND user_id = $2 AND refresh_token = $3`,
+				refreshID, userID, hashToken(tokenString))
+			return err
+		}
+	}
+
+	return s.RevokeToken(ctx, userID)
+}
+
+func (s *Server) parseSignedToken(tokenString string) (*jwt.Token, error) {
+	return jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(s.config.JWT.Secret), nil
+	}, jwt.WithIssuer("maigo-oauth2"))
+}
+
+func claimInt64(value any) (int64, bool) {
+	switch value := value.(type) {
+	case float64:
+		return int64(value), value == float64(int64(value))
+	case int64:
+		return value, true
+	case int:
+		return int64(value), true
+	default:
+		return 0, false
+	}
+}
+
+func hashToken(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:])
 }
 
 // Helper methods for database operations
@@ -669,44 +794,32 @@ func (s *Server) getClient(ctx context.Context, clientID string) (*models.OAuthC
 
 // validateRedirectURI validates redirect URI against registered client URI
 func (s *Server) validateRedirectURI(client *models.OAuthClient, redirectURI string) bool {
-	// For CLI applications, we allow exact match or localhost variations
+	if client == nil || ValidateRedirectURI(client.RedirectURI) != nil || ValidateRedirectURI(redirectURI) != nil {
+		return false
+	}
+
+	// Exact matches are the normal OAuth rule.
 	if client.RedirectURI == redirectURI {
 		return true
 	}
 
-	// Allow localhost with different ports for CLI apps
-	if strings.HasPrefix(client.RedirectURI, "http://localhost") &&
-		strings.HasPrefix(redirectURI, "http://localhost") {
-		return true
+	// The CLI may choose another local port when 8000 is busy. Permit that
+	// narrow loopback variation while keeping scheme, host, path, and query
+	// fixed. This avoids prefix checks such as "localhost.evil.example".
+	registered, registeredErr := url.Parse(client.RedirectURI)
+	requested, requestedErr := url.Parse(redirectURI)
+	if registeredErr != nil || requestedErr != nil || registered.User != nil || requested.User != nil {
+		return false
+	}
+	if registered.Scheme != "http" || requested.Scheme != "http" ||
+		!strings.EqualFold(registered.Hostname(), "localhost") ||
+		!strings.EqualFold(requested.Hostname(), "localhost") ||
+		registered.Path != requested.Path || registered.RawQuery != requested.RawQuery ||
+		requested.Port() == "" {
+		return false
 	}
 
-	return false
-}
-
-// storeAuthorizationCode stores authorization code with PKCE parameters
-func (s *Server) storeAuthorizationCode(ctx context.Context, authCode *models.AuthorizationCode) error {
-	query := `
-		INSERT INTO authorization_codes 
-		(code, client_id, user_id, redirect_uri, scope, code_challenge, code_challenge_method, expires_at, used, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`
-
-	// For now, we'll use a default user ID since user authentication happens separately
-	// In a real implementation, this would come from the authenticated user session
-	userID := int64(1) // TODO: Get from authenticated user session
-
-	_, err := s.db.Exec(ctx, query,
-		authCode.Code,
-		authCode.ClientID,
-		userID,
-		authCode.RedirectURI,
-		authCode.Scope,
-		authCode.CodeChallenge,
-		authCode.CodeChallengeMethod,
-		authCode.ExpiresAt,
-		authCode.Used,
-	)
-
-	return err
+	return true
 }
 
 // storeAuthorizationCodeWithUser stores authorization code with PKCE parameters and specific user ID
@@ -762,9 +875,16 @@ func (s *Server) getAuthorizationCode(ctx context.Context, code string) (*models
 
 // markAuthorizationCodeUsed marks authorization code as used
 func (s *Server) markAuthorizationCodeUsed(ctx context.Context, code string) error {
-	query := `UPDATE authorization_codes SET used = true WHERE code = $1`
-	_, err := s.db.Exec(ctx, query, code)
-	return err
+	result, err := s.db.Exec(ctx,
+		`UPDATE authorization_codes SET used = true WHERE code = $1 AND used = false AND expires_at > NOW()`,
+		code)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("authorization code already used or expired")
+	}
+	return nil
 }
 
 // getUserByID retrieves user by ID

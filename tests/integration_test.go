@@ -3,11 +3,15 @@ package tests
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database"
@@ -60,10 +65,11 @@ func (suite *IntegrationTestSuite) createTestUser() *models.User {
 		Email:    "test@example.com",
 	}
 
-	// Use a dummy password hash for testing
-	passwordHash := "$2a$10$dummypasswordhashfortesting"
+	// Use a real bcrypt hash so this fixture can be used by authentication tests.
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("test-password-123"), bcrypt.MinCost)
+	require.NoError(suite.T(), err)
 
-	err := suite.db.QueryRow(
+	err = suite.db.QueryRow(
 		context.Background(),
 		"INSERT INTO users (username, email, password_hash, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id",
 		user.Username, user.Email, passwordHash,
@@ -93,12 +99,15 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 	cfg, err := config.Load()
 	require.NoError(suite.T(), err)
 
-	// Override database settings for testing
-	cfg.Database.Host = "localhost"
-	cfg.Database.Port = 5432
-	cfg.Database.Name = "maigo_test"
-	cfg.Database.User = "postgres"
-	cfg.Database.Password = "password"
+	// Use the configured database by default. MAIGO_TEST_DATABASE_URL is a
+	// convenient one-off override for local or CI databases without requiring a
+	// second config file.
+	if databaseURL := os.Getenv("MAIGO_TEST_DATABASE_URL"); databaseURL != "" {
+		cfg.Database.URL = databaseURL
+		if parseErr := cfg.ParseDatabaseURL(); parseErr != nil {
+			require.NoError(suite.T(), parseErr)
+		}
+	}
 
 	// Initialize logger
 	suite.logger = logger.NewLogger(logger.Config{
@@ -107,15 +116,7 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 	})
 
 	// Initialize database connection
-	databaseURL := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		cfg.Database.User,
-		cfg.Database.Password,
-		cfg.Database.Host,
-		cfg.Database.Port,
-		cfg.Database.Name,
-		cfg.Database.SSLMode,
-	)
-	suite.db, err = database.NewConnection(databaseURL)
+	suite.db, err = database.NewConnection(cfg.DatabaseURL())
 	require.NoError(suite.T(), err)
 
 	// Run migrations
@@ -396,6 +397,232 @@ func (suite *IntegrationTestSuite) TestRedirectShortURL() {
 			}
 		})
 	}
+}
+
+// TestAuthenticationAndTokenLifecycle exercises bcrypt-backed login,
+// stateful refresh-token rotation, and logout revocation.
+func (suite *IntegrationTestSuite) TestAuthenticationAndTokenLifecycle() {
+	username := fmt.Sprintf("auth_user_%d", time.Now().UnixNano())
+	email := username + "@example.com"
+	password := "test-password-123"
+
+	registerBody, err := json.Marshal(models.CreateUserRequest{
+		Username: username,
+		Email:    email,
+		Password: password,
+	})
+	require.NoError(suite.T(), err)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(registerResp, registerReq)
+	require.Equal(suite.T(), http.StatusCreated, registerResp.Code)
+
+	var registration struct {
+		Tokens models.TokenResponse `json:"tokens"`
+	}
+	require.NoError(suite.T(), json.Unmarshal(registerResp.Body.Bytes(), &registration))
+	require.NotEmpty(suite.T(), registration.Tokens.RefreshToken)
+
+	duplicateBody, err := json.Marshal(models.CreateUserRequest{
+		Username: username,
+		Email:    "other-" + email,
+		Password: password,
+	})
+	require.NoError(suite.T(), err)
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(duplicateBody))
+	duplicateReq.Header.Set("Content-Type", "application/json")
+	duplicateResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(duplicateResp, duplicateReq)
+	assert.Equal(suite.T(), http.StatusConflict, duplicateResp.Code)
+
+	var storedHash string
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT password_hash FROM users WHERE username = $1", username).Scan(&storedHash)
+	require.NoError(suite.T(), err)
+	assert.NotEqual(suite.T(), password, storedHash)
+	assert.True(suite.T(), strings.HasPrefix(storedHash, "$2"), "password should be bcrypt-hashed")
+
+	loginBody, err := json.Marshal(map[string]string{
+		"username": username,
+		"password": password,
+	})
+	require.NoError(suite.T(), err)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(loginResp, loginReq)
+	require.Equal(suite.T(), http.StatusOK, loginResp.Code)
+
+	var loginTokens models.TokenResponse
+	require.NoError(suite.T(), json.Unmarshal(loginResp.Body.Bytes(), &loginTokens))
+	require.NotEmpty(suite.T(), loginTokens.AccessToken)
+
+	refreshBody, err := json.Marshal(models.TokenResponse{RefreshToken: loginTokens.RefreshToken})
+	require.NoError(suite.T(), err)
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", bytes.NewReader(refreshBody))
+	refreshReq.Header.Set("Content-Type", "application/json")
+	refreshResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(refreshResp, refreshReq)
+	require.Equal(suite.T(), http.StatusOK, refreshResp.Code)
+
+	var refreshedTokens models.TokenResponse
+	require.NoError(suite.T(), json.Unmarshal(refreshResp.Body.Bytes(), &refreshedTokens))
+	require.NotEmpty(suite.T(), refreshedTokens.RefreshToken)
+	assert.NotEqual(suite.T(), loginTokens.RefreshToken, refreshedTokens.RefreshToken)
+
+	// The old refresh token was consumed during rotation.
+	replayResp := httptest.NewRecorder()
+	replayReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", bytes.NewReader(refreshBody))
+	replayReq.Header.Set("Content-Type", "application/json")
+	suite.server.ServeHTTP(replayResp, replayReq)
+	assert.Equal(suite.T(), http.StatusUnauthorized, replayResp.Code)
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", http.NoBody)
+	logoutReq.Header.Set("Authorization", "Bearer "+refreshedTokens.AccessToken)
+	logoutResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(logoutResp, logoutReq)
+	require.Equal(suite.T(), http.StatusOK, logoutResp.Code)
+
+	latestRefreshBody, err := json.Marshal(models.TokenResponse{RefreshToken: refreshedTokens.RefreshToken})
+	require.NoError(suite.T(), err)
+	latestRefreshReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", bytes.NewReader(latestRefreshBody))
+	latestRefreshReq.Header.Set("Content-Type", "application/json")
+	latestRefreshResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(latestRefreshResp, latestRefreshReq)
+	assert.Equal(suite.T(), http.StatusUnauthorized, latestRefreshResp.Code)
+}
+
+// TestOAuthAuthorizationCodeFlow verifies that the consent flow binds the
+// issued authorization code to the logged-in user and enforces PKCE.
+func (suite *IntegrationTestSuite) TestOAuthAuthorizationCodeFlow() {
+	username := fmt.Sprintf("oauth_user_%d", time.Now().UnixNano())
+	email := username + "@example.com"
+	password := "oauth-password-123"
+	registerBody, err := json.Marshal(models.CreateUserRequest{
+		Username: username,
+		Email:    email,
+		Password: password,
+	})
+	require.NoError(suite.T(), err)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(registerResp, registerReq)
+	require.Equal(suite.T(), http.StatusCreated, registerResp.Code)
+
+	var registration struct {
+		User struct {
+			ID int64 `json:"id"`
+		} `json:"user"`
+	}
+	require.NoError(suite.T(), json.Unmarshal(registerResp.Body.Bytes(), &registration))
+	require.NotZero(suite.T(), registration.User.ID)
+
+	verifier := strings.Repeat("v", 43)
+	digest := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
+	params := url.Values{
+		"response_type":         []string{"code"},
+		"client_id":             []string{"maigo-cli"},
+		"redirect_uri":          []string{"http://localhost:8123/callback"},
+		"scope":                 []string{"read write"},
+		"state":                 []string{"oauth-state"},
+		"code_challenge":        []string{challenge},
+		"code_challenge_method": []string{"S256"},
+	}
+
+	loginPageReq := httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+params.Encode(), http.NoBody)
+	loginPageResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(loginPageResp, loginPageReq)
+	require.Equal(suite.T(), http.StatusOK, loginPageResp.Code)
+
+	loginParams := cloneURLValues(params)
+	loginParams.Set("action", "login")
+	loginParams.Set("username", username)
+	loginParams.Set("password", password)
+	loginReq := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(loginParams.Encode()))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(loginResp, loginReq)
+	require.Equal(suite.T(), http.StatusOK, loginResp.Code)
+	require.Contains(suite.T(), loginResp.Body.String(), "Authorize Application")
+
+	cookies := loginResp.Result().Cookies()
+	require.Len(suite.T(), cookies, 1)
+
+	consentParams := cloneURLValues(params)
+	consentParams.Set("action", "authorize")
+	consentReq := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(consentParams.Encode()))
+	consentReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	consentReq.AddCookie(cookies[0])
+	consentResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(consentResp, consentReq)
+	require.Equal(suite.T(), http.StatusFound, consentResp.Code)
+
+	callback, err := url.Parse(consentResp.Header().Get("Location"))
+	require.NoError(suite.T(), err)
+	authorizationCode := callback.Query().Get("code")
+	require.NotEmpty(suite.T(), authorizationCode)
+	assert.Equal(suite.T(), "oauth-state", callback.Query().Get("state"))
+
+	var storedUserID int64
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT user_id FROM authorization_codes WHERE code = $1", authorizationCode).Scan(&storedUserID)
+	require.NoError(suite.T(), err)
+	assert.Equal(suite.T(), registration.User.ID, storedUserID)
+
+	tokenParams := url.Values{
+		"grant_type":    []string{"authorization_code"},
+		"code":          []string{authorizationCode},
+		"redirect_uri":  []string{"http://localhost:8123/callback"},
+		"client_id":     []string{"maigo-cli"},
+		"code_verifier": []string{verifier},
+	}
+	tokenReq := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(tokenParams.Encode()))
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResp := httptest.NewRecorder()
+	suite.server.ServeHTTP(tokenResp, tokenReq)
+	require.Equal(suite.T(), http.StatusOK, tokenResp.Code)
+
+	var tokens models.TokenResponse
+	require.NoError(suite.T(), json.Unmarshal(tokenResp.Body.Bytes(), &tokens))
+	assert.NotEmpty(suite.T(), tokens.AccessToken)
+	assert.NotEmpty(suite.T(), tokens.RefreshToken)
+}
+
+// TestExpiredURLDoesNotRedirectOrCountAsAHit verifies the expiration guard on
+// the public redirect route.
+func (suite *IntegrationTestSuite) TestExpiredURLDoesNotRedirectOrCountAsAHit() {
+	var userID int64
+	err := suite.db.QueryRow(context.Background(),
+		"SELECT id FROM users WHERE username = $1", suite.testUser.Username).Scan(&userID)
+	require.NoError(suite.T(), err)
+
+	_, err = suite.db.Exec(context.Background(), `
+		INSERT INTO urls (short_code, target_url, user_id, hits, created_at, expires_at)
+		VALUES ($1, $2, $3, 0, NOW(), NOW() - INTERVAL '1 minute')`,
+		"expired", "https://example.com/expired", userID)
+	require.NoError(suite.T(), err)
+
+	req := httptest.NewRequest(http.MethodGet, "/expired", http.NoBody)
+	w := httptest.NewRecorder()
+	suite.server.ServeHTTP(w, req)
+	assert.Equal(suite.T(), http.StatusGone, w.Code)
+
+	var hits int64
+	err = suite.db.QueryRow(context.Background(),
+		"SELECT hits FROM urls WHERE short_code = $1", "expired").Scan(&hits)
+	require.NoError(suite.T(), err)
+	assert.Zero(suite.T(), hits)
+}
+
+func cloneURLValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, entries := range values {
+		cloned[key] = append([]string(nil), entries...)
+	}
+	return cloned
 }
 
 // TestHitTracking tests that hit counts are properly incremented

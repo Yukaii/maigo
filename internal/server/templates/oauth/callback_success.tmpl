@@ -1,8 +1,10 @@
 {{define "oauth/callback_success.tmpl"}}
-{{template "layouts/base.tmpl" .}}
+{{template "layouts/base-start" .}}
+{{template "oauth/callback-success-content" .}}
+{{template "layouts/base-end" .}}
 {{end}}
 
-{{define "content"}}
+{{define "oauth/callback-success-content"}}
     <div class="auth-box">
         <div class="header">
             <div class="header-icon check-icon">✅</div>

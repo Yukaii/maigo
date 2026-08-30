@@ -1,68 +1,33 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to Maigo will be documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and releases use
+[Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
 ### Added
-- GitHub Actions workflow for automated releases
-- GoReleaser v2 configuration for multi-platform builds
-- Docker image publishing to GitHub Container Registry
-- Linux packages (deb, rpm, apk)
-- Homebrew tap support (optional)
-- Automated changelog generation
-- Comprehensive release documentation
-- MIT License file
+
+- Pinned Go, Air, golangci-lint, migrate, GoReleaser, and goimports tooling in
+  `mise.toml`.
+- End-to-end PostgreSQL coverage for bcrypt authentication, OAuth/PKCE,
+  refresh rotation, logout, and expired-link behavior.
+- A current project status report and route-accurate OpenAPI specification.
 
 ### Changed
-- Separated CI and release workflows for better organization
-- Updated build process to use GoReleaser v2
-- Improved Dockerfile for minimal production images
-- Fixed deprecated GoReleaser configuration fields
-- Moved nfpm postinstall script to external file
+
+- Documented the project as a prototype with explicit deployment limitations.
+- Updated CI to use pinned tool versions and a configured integration database.
+- Wired Compose base-domain, TLS, rate-limit, and database settings through to
+  the application.
 
 ### Fixed
-- GoReleaser v2 compatibility issues
-- Deprecated configuration warnings
-- NFPM script execution errors
-- Missing LICENSE file in archives
 
-### Developer Experience
-- Added `make validate-release` command
-- Added `make check-goreleaser` for quick validation
-- Added `make release-snapshot` for testing
-- Added `make release-dry` for configuration testing
-- Updated setup process to include GoReleaser
+- Removed the hard-coded OAuth authorization-code user and enforced PKCE S256.
+- Replaced plaintext passwords with bcrypt hashes.
+- Added stateful refresh-token rotation and real refresh-session revocation.
+- Enforced exact/narrowly-scoped redirect URI matching and one-time auth codes.
+- Enforced URL expiration on redirects, fixed dynamic SQL updates, corrected
+  OAuth template rendering, and fixed CLI help/config handling.
 
-## Release Process
-
-This project uses [GoReleaser](https://goreleaser.com/) for automated releases.
-
-### Creating a Release
-
-1. Update the version and changelog
-2. Create and push a git tag:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-3. GitHub Actions will automatically:
-   - Build binaries for all platforms
-   - Create Docker images
-   - Generate Linux packages
-   - Create a GitHub release with changelog
-
-### Testing Releases
-
-Before creating a tag, test the release process:
-
-```bash
-# Validate configuration
-make validate-release
-
-# Test full build without publishing
-make release-snapshot
-```
+See [`docs/RELEASE.md`](docs/RELEASE.md) for the release workflow.

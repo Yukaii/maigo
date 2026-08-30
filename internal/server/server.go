@@ -81,7 +81,9 @@ func (s *HTTPServer) setupRoutes() {
 
 	// Health check endpoint
 	s.engine.GET("/health", healthHandler.HealthCheck)
+	s.engine.HEAD("/health", healthHandler.HealthCheck)
 	s.engine.GET("/health/ready", healthHandler.ReadinessCheck)
+	s.engine.HEAD("/health/ready", healthHandler.ReadinessCheck)
 
 	// OAuth 2.0 endpoints
 	oauth := s.engine.Group("/oauth")

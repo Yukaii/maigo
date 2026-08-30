@@ -1,217 +1,137 @@
-# Maigo API Documentation
+# Maigo API
 
-This directory contains the OpenAPI 3.0 specification for the Maigo URL Shortener API.
+[`openapi.yaml`](openapi.yaml) is the API contract for the current prototype.
+The server listens on `http://localhost:8080` by default.
 
-## Viewing the Documentation
+## Authentication
 
-### Online Swagger Editor
+The CLI uses OAuth 2.0 authorization code flow with mandatory PKCE/S256:
 
-1. Open [Swagger Editor](https://editor.swagger.io/)
-2. Go to **File > Import File**
-3. Select `openapi.yaml` from this directory
+1. Generate a 43–128 character code verifier and its SHA-256, base64url code challenge.
+2. Open `/oauth/authorize` with `response_type=code`, `client_id=maigo-cli`,
+   a registered localhost callback, `state`, `code_challenge`, and
+   `code_challenge_method=S256`.
+3. Sign in in the browser and approve the consent page.
+4. Exchange the callback code at `/oauth/token` with the same redirect URI and
+   code verifier.
+5. Send the access token as `Authorization: Bearer <access_token>`.
 
-### Local Swagger UI (Docker)
+The bundled CLI performs these steps automatically:
 
 ```bash
-# From the project root
-docker run -p 8081:8080 \
-  -e SWAGGER_JSON=/api/openapi.yaml \
-  -v $(pwd)/api:/api \
-  swaggerapi/swagger-ui
+maigo auth register alice alice@example.com
+maigo auth login alice
+maigo shorten https://example.com
 ```
 
-Then open http://localhost:8081 in your browser.
-
-### Using Redoc
+For a manual exchange, the request shape is:
 
 ```bash
-# Install redoc-cli globally
-npm install -g redoc-cli
-
-# Generate static HTML documentation
-redoc-cli bundle api/openapi.yaml -o api/docs.html
-
-# Or serve it locally
-redoc-cli serve api/openapi.yaml --port 8081
-```
-
-## API Overview
-
-The Maigo API provides:
-
-- **OAuth 2.0 Authentication** with PKCE support for CLI clients
-- **URL Shortening** with custom codes and expiration support
-- **URL Management** (create, list, get, delete)
-- **Health Checks** for monitoring
-- **User Management** (registration, login, profile)
-
-## Authentication Flow
-
-### OAuth 2.0 Authorization Code Flow with PKCE
-
-1. **Generate PKCE parameters**: Create a code verifier and challenge
-2. **Authorization Request**: Redirect to `/oauth/authorize` with PKCE challenge
-3. **User Authorization**: User approves/denies the request
-4. **Authorization Callback**: Receive authorization code
-5. **Token Exchange**: Exchange code for tokens at `/oauth/token` with PKCE verifier
-6. **API Requests**: Use access token in `Authorization: Bearer <token>` header
-7. **Token Refresh**: Use refresh token to get new access tokens
-
-### Example CLI Flow
-
-```bash
-# 1. CLI generates PKCE parameters
-code_verifier=$(openssl rand -base64 96 | tr -d '\n' | tr -d '=' | tr '+/' '-_')
-code_challenge=$(echo -n "$code_verifier" | openssl dgst -binary -sha256 | base64 | tr -d '\n' | tr -d '=' | tr '+/' '-_')
-
-# 2. Open browser to authorization URL
-open "http://localhost:8080/oauth/authorize?response_type=code&client_id=maigo-cli&redirect_uri=http://localhost:8000/callback&state=random_state&code_challenge=$code_challenge&code_challenge_method=S256"
-
-# 3. User approves, receives code in callback
-# authorization_code=<received_code>
-
-# 4. Exchange code for tokens
 curl -X POST http://localhost:8080/oauth/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=authorization_code" \
-  -d "code=$authorization_code" \
-  -d "client_id=maigo-cli" \
-  -d "redirect_uri=http://localhost:8000/callback" \
-  -d "code_verifier=$code_verifier"
-
-# 5. Use access token for API requests
-curl http://localhost:8080/api/v1/urls \
-  -H "Authorization: Bearer <access_token>"
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=authorization_code' \
+  --data-urlencode 'code=<authorization_code>' \
+  --data-urlencode 'client_id=maigo-cli' \
+  --data-urlencode 'redirect_uri=http://localhost:8000/callback' \
+  --data-urlencode 'code_verifier=<code_verifier>'
 ```
 
-## Quick Start Examples
+Access tokens use the configured `JWT_EXPIRATION` (24 hours by default).
+Refresh tokens are rotated and invalidated on logout or revocation; clients
+must persist the newest refresh token after each refresh.
 
-### Create Short URL
+## URL operations
+
+Create a URL:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/urls \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com/very/long/url",
-    "custom": "mylink",
-    "ttl": 86400
-  }'
+  -H 'Authorization: Bearer <access_token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/very/long/url","custom":"mylink","ttl":86400}'
 ```
 
-### List URLs
+List the current user’s URLs:
 
 ```bash
-curl http://localhost:8080/api/v1/urls?page=1&limit=20 \
-  -H "Authorization: Bearer <access_token>"
+curl 'http://localhost:8080/api/v1/user/urls?page=1&page_size=20' \
+  -H 'Authorization: Bearer <access_token>'
 ```
 
-### Redirect via Short Code
+Read metadata or follow a short code:
 
 ```bash
-curl -L http://localhost:8080/abc123
+curl http://localhost:8080/api/v1/urls/mylink
+curl -i http://localhost:8080/mylink
 ```
 
-### Refresh Access Token
+Statistics and deletion are owner-only:
 
 ```bash
-curl -X POST http://localhost:8080/oauth/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=refresh_token" \
-  -d "refresh_token=<refresh_token>" \
-  -d "client_id=maigo-cli"
+curl http://localhost:8080/api/v1/urls/mylink/stats \
+  -H 'Authorization: Bearer <access_token>'
+
+curl -X DELETE http://localhost:8080/api/v1/urls/mylink \
+  -H 'Authorization: Bearer <access_token>'
 ```
 
-## Error Handling
+`ttl` must be at least 60 seconds. Use either `ttl` or `expires_at`, not both;
+an explicit expiration must be in the future. Expired links return HTTP 410
+from the redirect endpoint and do not count a hit. URL metadata remains
+available and includes `expired: true`.
 
-All errors follow a consistent format:
+## Routes at a glance
+
+- `GET /health` — liveness.
+- `GET /health/ready` — liveness plus PostgreSQL readiness.
+- `POST /api/v1/auth/register`, `POST /api/v1/auth/login` — JSON auth helpers.
+- `POST /api/v1/auth/token` — JSON refresh compatibility endpoint.
+- `POST /api/v1/auth/logout` — revoke the current user’s refresh session.
+- `GET|POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` — OAuth.
+- `POST /api/v1/urls` — authenticated creation.
+- `GET /api/v1/user/urls` and `GET /api/v1/user/profile` — authenticated user data.
+- `GET /api/v1/urls/{code}` — public metadata.
+- `GET /api/v1/urls/{code}/stats`, `DELETE /api/v1/urls/{code}` — owner operations.
+- `GET /{code}` — public redirect.
+
+The create endpoint has a process-local global rate limiter. It is not shared
+between replicas and is not a substitute for an edge/API gateway limiter.
+
+## Error shape
+
+JSON API errors use:
 
 ```json
 {
-  "error": "error_code",
-  "message": "Human-readable error message",
-  "details": "Optional additional details"
+  "error": "bad_request",
+  "message": "Invalid request parameters",
+  "details": null
 }
 ```
 
-### OAuth 2.0 Errors
+OAuth token errors use the same envelope at the HTTP layer, with the OAuth
+error code in `error` (for example, `invalid_grant`).
 
-OAuth endpoints return standard OAuth 2.0 error codes:
+## Viewing the OpenAPI file
 
-- `invalid_request` - The request is missing a required parameter
-- `invalid_client` - Client authentication failed
-- `invalid_grant` - Invalid authorization code or refresh token
-- `unauthorized_client` - Client not authorized for this grant type
-- `unsupported_grant_type` - Grant type not supported
-- `invalid_scope` - Invalid or unknown scope
+Open `openapi.yaml` in [Swagger Editor](https://editor.swagger.io/), or run
+Swagger UI locally:
 
-### API Error Codes
-
-- `bad_request` - Invalid request parameters
-- `unauthorized` - Authentication required or failed
-- `forbidden` - Access denied (insufficient permissions)
-- `not_found` - Resource not found
-- `conflict` - Resource already exists
-- `internal_server_error` - Server error
-
-## Rate Limiting
-
-Currently no rate limiting is enforced. This may be added in future versions.
-
-## Pagination
-
-List endpoints support pagination with query parameters:
-
-- `page` - Page number (default: 1)
-- `limit` - Items per page (default: 20, max: 100)
-
-Response includes pagination metadata:
-
-```json
-{
-  "urls": [...],
-  "pagination": {
-    "page": 1,
-    "limit": 20,
-    "total": 100,
-    "total_pages": 5
-  }
-}
+```bash
+docker run --rm -p 8081:8080 \
+  -e SWAGGER_JSON=/api/openapi.yaml \
+  -v "$PWD/api:/api" swaggerapi/swagger-ui
 ```
 
-## URL Expiration
+Then visit <http://localhost:8081>.
 
-URLs can have optional expiration using either:
+## Current limitations
 
-1. **TTL (Time To Live)**: Relative expiration in seconds
-   ```json
-   { "url": "https://example.com", "ttl": 86400 }
-   ```
-
-2. **Exact Timestamp**: Absolute expiration time
-   ```json
-   { "url": "https://example.com", "expires_at": "2025-12-31T23:59:59Z" }
-   ```
-
-Expired URLs return HTTP 410 Gone when accessed.
-
-## Security Considerations
-
-1. **PKCE Required**: All CLI OAuth flows must use PKCE for security
-2. **HTTPS in Production**: Always use HTTPS in production environments
-3. **Token Storage**: Store tokens securely (e.g., encrypted local storage)
-4. **Token Expiration**: Access tokens expire after 1 hour by default
-5. **Refresh Tokens**: Use refresh tokens to obtain new access tokens
-
-## Development
-
-To update the API documentation:
-
-1. Edit `openapi.yaml`
-2. Validate the spec: https://editor.swagger.io/
-3. Test with the API to ensure accuracy
-4. Commit changes to version control
+The statistics timeline is currently an aggregate point, not a stored
+time-series. Rate limiting is in-memory. Configure HTTPS and a real secret
+manager for any deployment beyond local development. See
+[`docs/STATUS.md`](../docs/STATUS.md) for the fuller audit and next steps.
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT License — see [`LICENSE`](../LICENSE).

@@ -91,7 +91,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	user, err := h.oauthServer.RegisterUser(c.Request.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		h.logger.Error("User registration failed", "username", req.Username, "email", req.Email, "error", err)
-		SendAPIError(c, http.StatusConflict, "conflict", "Username or email already exists", nil)
+		if tokenErr, ok := err.(*oauth.TokenError); ok && tokenErr.ErrorCode == oauth.ErrorInvalidRequest {
+			SendAPIError(c, http.StatusConflict, "conflict", "Username or email already exists", nil)
+		} else {
+			SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to create user", nil)
+		}
 		return
 	}
 

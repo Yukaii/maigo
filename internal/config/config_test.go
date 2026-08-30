@@ -402,8 +402,8 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", config.Server.Host)
 	assert.Equal(t, 30*time.Second, config.Server.ReadTimeout)
 
-	assert.Equal(t, "maigo_cli", config.OAuth2.ClientID)
-	assert.Equal(t, "dev_secret_change_in_production", config.OAuth2.ClientSecret)
+	assert.Equal(t, "maigo-cli", config.OAuth2.ClientID)
+	assert.Equal(t, "cli-client-secret-not-used-with-pkce", config.OAuth2.ClientSecret)
 
 	assert.Equal(t, "dev_jwt_secret_change_in_production", config.JWT.Secret)
 	assert.Equal(t, 24*time.Hour, config.JWT.Expiration)

@@ -84,13 +84,6 @@ func NewConnection(databaseURL string) (*pgxpool.Pool, error) {
 
 // RunMigrations runs database migrations
 func RunMigrations(pool *pgxpool.Pool) error {
-	// Get a single connection for migrations
-	conn, err := pool.Acquire(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to acquire connection: %w", err)
-	}
-	defer conn.Release()
-
 	// Convert pgx connection to sql.DB for migrate
 	db := stdlib.OpenDBFromPool(pool)
 	defer func() {

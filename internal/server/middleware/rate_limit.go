@@ -13,6 +13,14 @@ import (
 
 // RateLimit creates a rate limiting middleware
 func RateLimit(rateLimitConfig config.RateLimitConfig) gin.HandlerFunc {
+	if rateLimitConfig.Requests <= 0 || rateLimitConfig.Window <= 0 {
+		// Treat a non-positive configuration as disabled instead of allowing
+		// rate.Every to divide by zero or constructing an unusable limiter.
+		return func(c *gin.Context) {
+			c.Next()
+		}
+	}
+
 	// Create a rate limiter
 	// This is a simple global rate limiter - in production you'd want per-IP limiting
 	limiter := rate.NewLimiter(

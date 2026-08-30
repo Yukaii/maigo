@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -37,11 +38,10 @@ It provides imperative CLI commands for direct URL management and analytics.`,
 		"config file path (default searches for maigo.yaml in current directory and $HOME/.maigo/)",
 	)
 
-	// Parse flags to get configFile value
-	if err := rootCmd.ParseFlags(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
-		os.Exit(1)
-	}
+	// Read the config path before Cobra executes the command. Cobra still
+	// parses and validates the flag later, but doing this here lets every
+	// command use the selected configuration during initialization.
+	configFile = configPathFromArgs(os.Args[1:])
 
 	// Load configuration with optional config file path
 	cfg, err := config.Load(configFile)
@@ -75,4 +75,20 @@ It provides imperative CLI commands for direct URL management and analytics.`,
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// configPathFromArgs extracts the persistent --config flag without parsing
+// the rest of the command line. Parsing the full argument list here would
+// make normal Cobra help requests look like fatal errors.
+func configPathFromArgs(args []string) string {
+	for i, arg := range args {
+		if arg == "--config" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(arg, "--config=") {
+			return strings.TrimPrefix(arg, "--config=")
+		}
+	}
+
+	return ""
 }

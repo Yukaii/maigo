@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := help
 
 # Variables
-GO_VERSION := 1.21
+GO_VERSION := 1.23.12
 BINARY_NAME := maigo
 MAIN_PACKAGE := ./cmd/$(BINARY_NAME)
 COVERAGE_FILE := coverage.out
@@ -11,6 +11,9 @@ COVERAGE_FILE := coverage.out
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+
+# Keep local commands on the versions declared in mise.toml.
+MISE := mise exec --
 
 # LDFLAGS for version info
 LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
@@ -23,28 +26,24 @@ help:
 ## setup: Initialize development environment
 setup:
 	@echo "Setting up development environment..."
-	go version
-	go mod download
-	go mod tidy
+	@mise install
+	$(MISE) go version
+	$(MISE) go mod download
+	$(MISE) go mod tidy
 	@if [ ! -f .env ]; then cp .env.example .env; else echo ".env already exists, skipping copy."; fi
-	@echo "Installing development tools..."
-	go install github.com/air-verse/air@latest
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	go install golang.org/x/tools/cmd/goimports@latest
-	go install github.com/goreleaser/goreleaser/v2@latest
+	@echo "Development tools are managed by mise.toml."
 	@echo "Setup complete! Edit .env file with your configuration."
 
 ## build: Build the binary
 build: clean
 	@echo "Building binary..."
-	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/$(BINARY_NAME) $(MAIN_PACKAGE)
+	CGO_ENABLED=0 $(MISE) go build $(LDFLAGS) -o bin/$(BINARY_NAME) $(MAIN_PACKAGE)
 	@echo "Built: bin/$(BINARY_NAME)"
 
 ## dev: Start development server with hot reload
 dev:
 	@echo "Starting development server with hot reload..."
-	air
+	$(MISE) air
 
 ## test: Run all tests
 test: test-unit test-integration
@@ -52,12 +51,12 @@ test: test-unit test-integration
 ## test-unit: Run unit tests only
 test-unit:
 	@echo "Running unit tests..."
-	go test -v -race -short ./internal/...
+	$(MISE) go test -v -race -short ./internal/...
 
 ## test-integration: Run integration tests
 test-integration: test-setup
 	@echo "Running integration tests..."
-	CONFIG_PATH=config/test.yaml go test -v ./tests/...
+	CONFIG_PATH=config/test.yaml $(MISE) go test -v ./tests/...
 
 ## test-setup: Set up test database
 test-setup:
@@ -72,43 +71,43 @@ test-clean:
 ## coverage: Generate test coverage report
 coverage:
 	@echo "Generating coverage report..."
-	go test -v -race -coverprofile=$(COVERAGE_FILE) ./...
-	go tool cover -html=$(COVERAGE_FILE) -o coverage.html
+	$(MISE) go test -v -race -coverprofile=$(COVERAGE_FILE) ./...
+	$(MISE) go tool cover -html=$(COVERAGE_FILE) -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
 ## benchmark: Run benchmarks
 benchmark:
 	@echo "Running benchmarks..."
-	go test -bench=. -benchmem ./...
+	$(MISE) go test -bench=. -benchmem ./...
 
 ## lint: Run linter
 lint:
 	@echo "Running linter..."
-	golangci-lint run
+	$(MISE) golangci-lint run
 
 ## lint-full: Run full linter with config
 lint-full:
 	@echo "Running full linter..."
-	golangci-lint run
+	$(MISE) golangci-lint run
 
 ## lint-fix: Run linter with auto-fix
 lint-fix:
 	@echo "Running linter with auto-fix..."
-	golangci-lint run --no-config --disable-all -E errcheck -E gosimple -E govet -E ineffassign -E unused -E gofmt -E goimports -E misspell --fix ./...
+	$(MISE) golangci-lint run --no-config --disable-all -E errcheck -E gosimple -E govet -E ineffassign -E unused -E gofmt -E goimports -E misspell --fix ./...
 
 ## fmt: Format code
 fmt:
 	@echo "Formatting code..."
-	gofmt -s -w .
-	goimports -w .
-	go mod tidy
+	$(MISE) gofmt -s -w .
+	$(MISE) goimports -w .
+	$(MISE) go mod tidy
 
 ## fmt-check: Check if code is formatted
 fmt-check:
 	@echo "Checking code formatting..."
-	@if [ "$$(gofmt -s -l . | wc -l)" -gt 0 ]; then \
+	@if [ "$$( $(MISE) gofmt -s -l . | wc -l)" -gt 0 ]; then \
 		echo "Code is not formatted. Run 'make fmt' to fix."; \
-		gofmt -s -l .; \
+		$(MISE) gofmt -s -l .; \
 		exit 1; \
 	fi
 	@echo "Code is properly formatted."
@@ -119,8 +118,8 @@ clean:
 	rm -rf bin/
 	rm -rf dist/
 	rm -f $(COVERAGE_FILE) coverage.html
-	go clean -cache
-	go clean -testcache
+	$(MISE) go clean -cache
+	$(MISE) go clean -testcache
 
 ## server: Start HTTP server
 server: build
@@ -130,17 +129,17 @@ server: build
 ## migrate-up: Apply database migrations
 migrate-up:
 	@echo "Applying database migrations..."
-	migrate -path internal/database/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@$$DB_HOST:$$DB_PORT/$$DB_NAME?sslmode=$$DB_SSL_MODE" up
+	$(MISE) migrate -path internal/database/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@$$DB_HOST:$$DB_PORT/$$DB_NAME?sslmode=$$DB_SSL_MODE" up
 
 ## migrate-down: Rollback database migrations
 migrate-down:
 	@echo "Rolling back database migrations..."
-	migrate -path internal/database/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@$$DB_HOST:$$DB_PORT/$$DB_NAME?sslmode=$$DB_SSL_MODE" down
+	$(MISE) migrate -path internal/database/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@$$DB_HOST:$$DB_PORT/$$DB_NAME?sslmode=$$DB_SSL_MODE" down
 
 ## migrate-create: Create new migration (usage: make migrate-create NAME=create_users)
 migrate-create:
 	@if [ -z "$(NAME)" ]; then echo "Usage: make migrate-create NAME=migration_name"; exit 1; fi
-	migrate create -ext sql -dir internal/database/migrations $(NAME)
+	$(MISE) migrate create -ext sql -dir internal/database/migrations $(NAME)
 
 ## db-setup: Initialize PostgreSQL database
 db-setup:
@@ -157,17 +156,12 @@ db-reset:
 ## db-seed: Populate database with test data
 db-seed:
 	@echo "Seeding database with test data..."
-	go run scripts/seed.go
+	$(MISE) go run scripts/seed.go
 
 ## install-tools: Install development dependencies
 install-tools:
 	@echo "Installing development tools..."
-	go install github.com/air-verse/air@latest
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	go install golang.org/x/tools/cmd/goimports@latest
-	go install github.com/swaggo/swag/cmd/swag@latest
-	go install github.com/goreleaser/goreleaser/v2@latest
+	mise install
 
 ## check: Run all quality checks
 check: fmt-check lint test
@@ -178,33 +172,33 @@ ci: fmt-check lint test coverage
 ## build-linux: Cross-compile for Linux
 build-linux: clean
 	@echo "Building for Linux..."
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 $(MAIN_PACKAGE)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(MISE) go build $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 $(MAIN_PACKAGE)
 
 ## build-darwin: Cross-compile for macOS
 build-darwin: clean
 	@echo "Building for macOS..."
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 $(MAIN_PACKAGE)
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 $(MAIN_PACKAGE)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(MISE) go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 $(MAIN_PACKAGE)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(MISE) go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 $(MAIN_PACKAGE)
 
 ## build-windows: Cross-compile for Windows
 build-windows: clean
 	@echo "Building for Windows..."
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PACKAGE)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(MISE) go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe $(MAIN_PACKAGE)
 
 ## release: Build release binaries for all platforms using GoReleaser
 release:
 	@echo "Building release with GoReleaser..."
-	goreleaser release --clean
+	$(MISE) goreleaser release --clean
 
 ## release-snapshot: Build snapshot release without publishing
 release-snapshot:
 	@echo "Building snapshot release with GoReleaser..."
-	goreleaser release --snapshot --clean
+	$(MISE) goreleaser release --snapshot --clean
 
 ## release-dry: Test release build without publishing
 release-dry:
 	@echo "Testing release build with GoReleaser..."
-	goreleaser release --snapshot --clean --skip=publish
+	$(MISE) goreleaser release --snapshot --clean --skip=publish
 
 ## validate-release: Validate GoReleaser configuration and test build
 validate-release:
@@ -215,7 +209,7 @@ validate-release:
 ## check-goreleaser: Quick check of GoReleaser configuration
 check-goreleaser:
 	@echo "Checking GoReleaser configuration..."
-	goreleaser check
+	$(MISE) goreleaser check
 
 ## update-goreleaser: Update GoReleaser to v2 and validate
 update-goreleaser:

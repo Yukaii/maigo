@@ -1,203 +1,131 @@
+# Maigo
 
-# Maigo - Terminal-First URL Shortener
+Maigo is a small, terminal-first URL shortener written in Go. It has a Gin
+HTTP API, a Cobra CLI, PostgreSQL persistence, OAuth 2.0 authorization-code
+flow with PKCE, and a minimal browser consent screen.
 
-Maigo is a **terminal-first URL shortener** built with Go, designed for a geek-focused, CLI-first experience. It features a modern Go project structure, secure OAuth 2.0 authentication (with PKCE for CLI), and production-ready architecture with PostgreSQL and comprehensive testing.
+This is a polished prototype rather than a finished hosted service. The
+current implementation and verification status are tracked in
+[`docs/STATUS.md`](docs/STATUS.md).
 
-## Installation
+## Quick start
 
-### Download Binary (Recommended)
-
-Download the latest release for your platform from the [Releases page](https://github.com/yukaii/maigo/releases).
-
-```bash
-# Example for Linux/macOS
-curl -L https://github.com/yukaii/maigo/releases/latest/download/maigo_<version>_<os>_<arch>.tar.gz | tar xz
-sudo mv maigo /usr/local/bin/
-```
-
-### Using Go Install
+Install the pinned development tools and run the unit suite:
 
 ```bash
-go install github.com/yukaii/maigo/cmd/maigo@latest
-```
-
-### Using Homebrew (macOS/Linux)
-
-```bash
-brew install yukaii/tap/maigo
-```
-
-### Docker
-
-```bash
-# Run server
-docker run -p 8080:8080 ghcr.io/yukaii/maigo:latest server
-
-# Run CLI commands
-docker run ghcr.io/yukaii/maigo:latest --help
-```
-
-### Linux Packages
-
-Download `.deb`, `.rpm`, or `.apk` packages from the [Releases page](https://github.com/yukaii/maigo/releases).
-
-```bash
-# Debian/Ubuntu
-sudo dpkg -i maigo_<version>_linux_amd64.deb
-
-# RHEL/CentOS/Fedora
-sudo rpm -i maigo_<version>_linux_amd64.rpm
-
-# Alpine
-sudo apk add --allow-untrusted maigo_<version>_linux_amd64.apk
-```
-
-## Quick Start
-
-```bash
-# Setup development environment
 make setup
-
-# Start development server with hot reload
-make dev
-
-# Run all tests
-make test
+make test-unit
 ```
 
-## Features
-
-- 🔐 **OAuth 2.0 Authentication (PKCE)** – Secure, standards-compliant OAuth 2.0 with PKCE for CLI
-- 💻 **CLI-First Workflow** – All URL management via imperative CLI commands
-- 🌐 **Wildcard Subdomain Support** – Short URLs like `abc.maigo.dev`
-- �️ **PostgreSQL Backend** – Robust, production-ready data persistence
-- ⚡ **High Performance** – Built with Gin web framework
-- 📦 **12-Factor App Configuration** – ENV vars, CLI flags, config file (with clear precedence)
-- 🧪 **Comprehensive Testing** – Integration and unit tests, automated DB setup
-- 📝 **No Web Dashboard** – Minimal web UI for OAuth only; all management via CLI
-
-## Architecture
-
-- **Backend**: Go (Gin web framework)
-- **CLI**: Cobra framework (imperative commands)
-- **Database**: PostgreSQL (pgx driver, migrations)
-- **Authentication**: OAuth 2.0 (PKCE, JWT tokens)
-- **Testing**: Testify, automated DB setup
-
-## CLI Command Structure
+For a local database, start PostgreSQL with Compose, load the environment
+template into the shell, and start the server:
 
 ```bash
-# Authentication (OAuth 2.0 with PKCE)
-maigo auth register <username> <email>   # Register via CLI with browser-based OAuth
-maigo auth login <username>              # Login with browser-based OAuth
-maigo auth logout                        # Clear local OAuth tokens
-maigo auth status                        # Show current OAuth authentication status
-
-# URL Management
-maigo shorten <url>                      # Create short URL
-maigo shorten <url> --custom <code>      # Create with custom short code
-maigo list                               # List all user URLs
-maigo list --limit 10                    # List recent 10 URLs
-maigo get <short-code>                   # Get URL details
-maigo delete <short-code>                # Delete URL
-maigo delete <short-code> --force        # Delete without confirmation
-maigo stats <short-code>                 # Show URL analytics
-
-# Server Operations
-maigo server                             # Start HTTP server
-
-# System Commands
-maigo version                            # Show version
-maigo config                             # Show configuration
+cp .env.example .env
+docker compose up -d postgres
+set -a; . ./.env; set +a
+mise exec -- go run ./cmd/maigo server
 ```
 
-## 12-Factor App Configuration
+The server runs on `http://127.0.0.1:8080` by default and applies embedded
+database migrations on startup. The default Compose database is suitable for
+local development only. Change `JWT_SECRET` and database credentials before
+using the service anywhere shared.
 
-Maigo supports configuration via environment variables (highest priority), command-line flags, and config file (lowest priority).
-
-**Environment Variables Example:**
+## CLI
 
 ```bash
-export DATABASE_URL="postgres://username:password@host:port/database?sslmode=require"
-export PORT=8080
-export JWT_SECRET="your-secure-jwt-secret"
-maigo server
+maigo auth register <username> <email>
+maigo auth login <username>       # opens the browser-based PKCE flow
+maigo auth status
+maigo auth logout
+
+maigo shorten <url>
+maigo shorten <url> --custom <code> --ttl 86400
+maigo list --page 1 --page-size 20
+maigo get <short-code>
+maigo stats <short-code>
+maigo delete <short-code> --force
 ```
 
-**Command-Line Flags Example:**
+The CLI stores its local token file under the platform-specific user config
+directory. `--config path/to/maigo.yaml` and `CONFIG_PATH` select a config
+file; environment variables override file values, and command-line flags
+override both.
+
+Development tools are pinned in [`mise.toml`](mise.toml): Go, Air,
+golangci-lint, migrate, GoReleaser, and goimports.
+
+## HTTP API
+
+Health:
+
+- `GET /health` — liveness check.
+- `GET /health/ready` — liveness plus database connectivity.
+
+Authentication:
+
+- `POST /api/v1/auth/register` — create an account and return tokens.
+- `POST /api/v1/auth/login` — log in with username or email.
+- `POST /api/v1/auth/token` — JSON refresh-token compatibility endpoint.
+- `POST /api/v1/auth/logout` — revoke the authenticated user’s refresh session.
+- `GET|POST /oauth/authorize` — browser authorization and consent.
+- `POST /oauth/token` — OAuth authorization-code or refresh-token exchange.
+- `POST /oauth/revoke` — revoke a refresh token.
+
+URL management:
+
+- `POST /api/v1/urls` — create a URL; authentication required.
+- `GET /api/v1/user/urls` — list the authenticated user’s URLs.
+- `GET /api/v1/urls/{code}` — read public URL metadata.
+- `GET /api/v1/urls/{code}/stats` — read owned URL statistics.
+- `DELETE /api/v1/urls/{code}` — delete an owned URL.
+- `GET /{code}` — redirect to the target and count a hit.
+
+See [`api/README.md`](api/README.md) and [`api/openapi.yaml`](api/openapi.yaml)
+for request and response examples.
+
+## Development commands
 
 ```bash
-maigo server --database-url "postgres://user:pass@host:port/db?sslmode=require" --host 0.0.0.0
+make test-unit          # unit tests with race detection
+make test-integration   # resets the configured test DB, then runs integration tests
+make test               # unit + integration
+make build              # build bin/maigo
+make lint
+make fmt-check
+make check-goreleaser
 ```
 
-**Config File Example:** (`config/config.yaml`)
-
-```yaml
-database:
-  host: localhost
-  port: 5432
-  name: maigo
-  user: postgres
-  password: password
-  ssl_mode: disable
-server:
-  port: 8080
-  host: 127.0.0.1
-```
-
-## Development Commands
+The integration suite needs PostgreSQL. For an isolated local database:
 
 ```bash
-make dev          # Start development server with hot reload
-make build        # Build the binary
-make test         # Run all tests
-make server       # Start HTTP server (port 8080)
-make db-setup     # Initialize PostgreSQL database
-make test-setup   # Setup test database and run tests
+DB_PORT=55432 DB_NAME=maigo_test DB_USER=postgres DB_PASSWORD=password \
+  docker compose -p maigo-audit up -d postgres
+MAIGO_TEST_DATABASE_URL='postgres://postgres:password@localhost:55432/maigo_test?sslmode=disable' \
+  mise exec -- go test ./tests/...
 ```
 
-## API Endpoints
+`make test-unit` is the database-free check. `make test-integration` uses
+`scripts/setup_test_db.sh`, which intentionally drops and recreates the
+configured test database.
 
-**Core Functionality:**
-- `GET /{short_code}` – Redirect to target URL with hit tracking
-- `GET /health` – Health check
-- `GET /health/ready` – Database health check
+## Project layout
 
-**OAuth 2.0 Authentication:**
-- `GET /oauth/authorize` – OAuth 2.0 authorization endpoint (HTML form)
-- `POST /oauth/authorize` – Process authorization (PKCE support)
-- `POST /oauth/token` – Token exchange (authorization code → access token)
-- `POST /oauth/revoke` – Token revocation
-- `POST /api/v1/auth/register` – User registration (OAuth 2.0)
-- `POST /api/v1/auth/login` – User login (OAuth 2.0)
-- `POST /api/v1/auth/refresh` – Refresh access token
-
-**URL Management (Protected):**
-- `POST /api/v1/urls` – Create short URL (auth required)
-- `GET /api/v1/urls` – List user URLs (auth required)
-- `GET /api/v1/urls/{id}` – Get URL details (auth required)
-- `DELETE /api/v1/urls/{id}` – Delete URL (auth required)
-
-## Project Structure
-
-```
-maigo/
-├── cmd/
-│   └── maigo/main.go            # CLI application with server command
-├── internal/
-│   ├── server/handlers/         # HTTP handlers (OAuth2, URL)
-│   ├── database/models/         # Data models
-│   ├── oauth/                   # OAuth2 server
-│   ├── shortener/               # URL shortening logic
-│   └── config/                  # Configuration
-├── config/
-│   └── config.yaml              # Application configuration
-├── tests/
-│   └── integration_test.go      # Integration tests
-├── go.mod                       # Go dependencies
-└── Makefile                     # Build automation
+```text
+cmd/maigo/                 CLI entry point
+internal/cli/              CLI commands and OAuth client
+internal/config/           configuration loading and validation
+internal/database/         PostgreSQL connection, migrations, repositories
+internal/oauth/            PKCE, authorization codes, JWT/session handling
+internal/server/           HTTP routes, handlers, middleware, templates
+internal/shortener/        Base62 and URL validation logic
+tests/                     PostgreSQL-backed integration tests
+api/                       OpenAPI specification and API notes
+maigo.example.yaml         tracked YAML configuration template
+mise.toml                  pinned local toolchain
 ```
 
 ## License
 
-MIT License – see [LICENSE](LICENSE) for details.
+MIT License — see [`LICENSE`](LICENSE).

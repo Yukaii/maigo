@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	urlpkg "net/url"
 	"strings"
 )
 
@@ -17,6 +18,9 @@ const (
 
 	// Maximum attempts to generate a unique short code
 	maxAttempts = 10
+
+	// Minimum length for a user-supplied short code
+	minCustomLength = 3
 )
 
 // Encoder handles URL shortening operations
@@ -102,6 +106,10 @@ func (e *Encoder) GenerateCustom(custom string) (string, error) {
 		return "", fmt.Errorf("custom short code cannot be empty")
 	}
 
+	if len(custom) < minCustomLength {
+		return "", fmt.Errorf("custom short code too short (min %d characters)", minCustomLength)
+	}
+
 	if len(custom) > 50 {
 		return "", fmt.Errorf("custom short code too long (max 50 characters)")
 	}
@@ -136,39 +144,43 @@ func (e *Encoder) ValidateShortCode(shortCode string) error {
 }
 
 // IsValidURL performs basic URL validation
-func IsValidURL(url string) bool {
-	if url == "" {
+func IsValidURL(rawURL string) bool {
+	if rawURL == "" {
 		return false
 	}
 
-	// Basic validation - starts with http:// or https://
-	return strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")
+	parsedURL, err := urlpkg.Parse(rawURL)
+	if err != nil || parsedURL.Hostname() == "" {
+		return false
+	}
+
+	scheme := strings.ToLower(parsedURL.Scheme)
+	return scheme == "http" || scheme == "https"
 }
 
 // SanitizeURL cleans and validates a URL
-func SanitizeURL(url string) (string, error) {
-	if url == "" {
+func SanitizeURL(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
 		return "", fmt.Errorf("URL cannot be empty")
 	}
 
-	// Trim whitespace
-	url = strings.TrimSpace(url)
-
 	// Add https:// if no protocol specified
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url = "https://" + url
+	lowerURL := strings.ToLower(rawURL)
+	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
+		rawURL = "https://" + rawURL
 	}
 
 	// Basic validation
-	if !IsValidURL(url) {
+	if !IsValidURL(rawURL) {
 		return "", fmt.Errorf("invalid URL format")
 	}
 
-	if len(url) > 2048 {
+	if len(rawURL) > 2048 {
 		return "", fmt.Errorf("URL too long (max 2048 characters)")
 	}
 
-	return url, nil
+	return rawURL, nil
 }
 
 // Helper function to calculate power

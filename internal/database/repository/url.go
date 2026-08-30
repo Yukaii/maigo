@@ -4,6 +4,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -168,11 +169,7 @@ func (r *URLRepository) Update(ctx context.Context, id int64, updates map[string
 		UPDATE urls
 		SET %s
 		WHERE id = $%d`,
-		setParts[0], argIndex)
-
-	for i := 1; i < len(setParts); i++ {
-		query = fmt.Sprintf("%s, %s", query, setParts[i])
-	}
+		strings.Join(setParts, ", "), argIndex)
 
 	_, err := r.db.Exec(ctx, query, args...)
 	if err != nil {

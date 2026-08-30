@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -78,14 +79,30 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 		}
 	}
 
-	// Calculate expiration time from TTL or explicit expiration
+	// Calculate expiration time from TTL or explicit expiration.
+	if req.TTL != nil && req.ExpiresAt != nil {
+		SendAPIError(c, http.StatusBadRequest, "bad_request", "Provide either ttl or expires_at, not both", nil)
+		return
+	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		// Use explicit expiration time
+		if !req.ExpiresAt.After(time.Now()) {
+			SendAPIError(c, http.StatusBadRequest, "bad_request", "expires_at must be in the future", nil)
+			return
+		}
 		expiresAt = req.ExpiresAt
 	} else if req.TTL != nil {
-		// Calculate expiration from TTL (seconds)
-		expiration := time.Now().Add(time.Duration(*req.TTL) * time.Second)
+		if *req.TTL < 60 {
+			SendAPIError(c, http.StatusBadRequest, "bad_request", "ttl must be at least 60 seconds", nil)
+			return
+		}
+		// Calculate expiration from TTL (seconds), rejecting duration overflow.
+		ttl := time.Duration(*req.TTL) * time.Second
+		if ttl <= 0 {
+			SendAPIError(c, http.StatusBadRequest, "bad_request", "ttl is too large", nil)
+			return
+		}
+		expiration := time.Now().Add(ttl)
 		expiresAt = &expiration
 	}
 	// If neither TTL nor ExpiresAt is provided, expiresAt remains nil (no expiration)
@@ -103,7 +120,8 @@ func (h *URLHandler) CreateShortURL(c *gin.Context) {
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
-		"short_url":  "https://" + h.config.App.BaseDomain + "/" + url.ShortCode,
+		"target_url": url.TargetURL,
+		"short_url":  h.shortURL(url.ShortCode),
 		"created_at": url.CreatedAt.Format(time.RFC3339),
 		"hits":       url.Hits,
 	}
@@ -154,7 +172,8 @@ func (h *URLHandler) GetURL(c *gin.Context) {
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
-		"short_url":  "https://" + h.config.App.BaseDomain + "/" + url.ShortCode,
+		"target_url": url.TargetURL,
+		"short_url":  h.shortURL(url.ShortCode),
 		"created_at": url.CreatedAt.Format(time.RFC3339),
 		"hits":       url.Hits,
 	}
@@ -193,6 +212,11 @@ func (h *URLHandler) RedirectShortURL(c *gin.Context) {
 	if err != nil {
 		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
 		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
+		return
+	}
+	if url.IsExpired() {
+		h.logger.Info("Expired short URL requested", "short_code", shortCode, "expired_at", url.ExpiresAt)
+		SendAPIError(c, http.StatusGone, "gone", "Short URL has expired", nil)
 		return
 	}
 
@@ -242,13 +266,6 @@ func (h *URLHandler) DeleteURL(c *gin.Context) {
 	if err != nil {
 		h.logger.Warn("URL not found", "short_code", shortCode, "error", err)
 		SendAPIError(c, http.StatusNotFound, "not_found", "Short URL not found", nil)
-		return
-	}
-
-	// Check if URL has expired
-	if url.IsExpired() {
-		h.logger.Warn("URL has expired", "short_code", shortCode, "expired_at", url.ExpiresAt)
-		SendAPIError(c, http.StatusGone, "gone", "Short URL has expired", nil)
 		return
 	}
 
@@ -308,19 +325,6 @@ func (h *URLHandler) GetUserURLs(c *gin.Context) {
 		h.logger.Error("Failed to get user URLs", "user_id", uid, "error", err)
 		SendAPIError(c, http.StatusInternalServerError, "internal_server_error", "Failed to retrieve URLs", nil)
 		return
-	}
-
-	// Build response URLs
-	responseURLs := make([]map[string]interface{}, len(urls))
-	for i, url := range urls {
-		responseURLs[i] = map[string]interface{}{
-			"id":         url.ID,
-			"short_code": url.ShortCode,
-			"url":        url.TargetURL,
-			"short_url":  "https://" + h.config.App.BaseDomain + "/" + url.ShortCode,
-			"created_at": url.CreatedAt.Format(time.RFC3339),
-			"hits":       url.Hits,
-		}
 	}
 
 	// Calculate pagination
@@ -389,13 +393,14 @@ func (h *URLHandler) GetURLStats(c *gin.Context) {
 		"id":         url.ID,
 		"short_code": url.ShortCode,
 		"url":        url.TargetURL,
-		"short_url":  "https://" + h.config.App.BaseDomain + "/" + url.ShortCode,
+		"target_url": url.TargetURL,
+		"short_url":  h.shortURL(url.ShortCode),
 		"hits":       url.Hits,
 		"created_at": url.CreatedAt.Format(time.RFC3339),
 	}
 
-	// TODO: Add more detailed analytics (daily/weekly/monthly breakdowns)
-	// For now, just return basic stats
+	// The current schema stores only the aggregate hit count, so expose one
+	// point until click events and time-bucketed analytics are added.
 	response["timeline"] = []map[string]interface{}{
 		{
 			"date": url.CreatedAt.Format("2006-01-02"),
@@ -406,4 +411,16 @@ func (h *URLHandler) GetURLStats(c *gin.Context) {
 	h.logger.Info("Retrieved URL statistics", "short_code", shortCode, "user_id", uid)
 
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *URLHandler) shortURL(shortCode string) string {
+	scheme := "http"
+	if h.config.App.TLS {
+		scheme = "https"
+	}
+	domain := strings.TrimRight(h.config.App.BaseDomain, "/")
+	if strings.HasPrefix(domain, "http://") || strings.HasPrefix(domain, "https://") {
+		return domain + "/" + shortCode
+	}
+	return scheme + "://" + domain + "/" + shortCode
 }

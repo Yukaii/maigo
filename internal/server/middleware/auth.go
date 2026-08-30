@@ -15,9 +15,6 @@ import (
 // Auth is a middleware that validates JWT tokens
 func Auth(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Debug log
-		c.Header("X-Debug-Auth", "called")
-
 		tokenString, err := extractBearerToken(c)
 		if err != nil {
 			respondUnauthorized(c, err.Error())
@@ -27,6 +24,19 @@ func Auth(cfg *config.Config) gin.HandlerFunc {
 		token, err := validateJWTToken(tokenString, cfg.JWT.Secret)
 		if err != nil {
 			respondUnauthorized(c, "Invalid or expired token")
+			return
+		}
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			respondUnauthorized(c, "Invalid or expired token")
+			return
+		}
+		if tokenType, ok := claims["type"].(string); !ok || tokenType != "access" {
+			respondUnauthorized(c, "Access token required")
+			return
+		}
+		if userID, ok := claims["user_id"].(float64); !ok || userID <= 0 || userID != float64(int64(userID)) {
+			respondUnauthorized(c, "Invalid token subject")
 			return
 		}
 
@@ -41,7 +51,7 @@ func extractBearerToken(c *gin.Context) (string, error) {
 		return "", fmt.Errorf("authorization header is required")
 	}
 
-	parts := strings.Split(authHeader, " ")
+	parts := strings.Fields(authHeader)
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		return "", fmt.Errorf("invalid authorization header format")
 	}
@@ -51,11 +61,11 @@ func extractBearerToken(c *gin.Context) (string, error) {
 
 func validateJWTToken(tokenString, secret string) (*jwt.Token, error) {
 	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method != jwt.SigningMethodHS256 {
 			return nil, jwt.ErrSignatureInvalid
 		}
 		return []byte(secret), nil
-	})
+	}, jwt.WithIssuer("maigo-oauth2"), jwt.WithAudience("maigo-api"))
 }
 
 func respondUnauthorized(c *gin.Context, message string) {

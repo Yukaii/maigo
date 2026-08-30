@@ -349,6 +349,12 @@ func runServer(cfg *config.Config, log *logger.Logger) error {
 
 	log.Info("Connected to database", "host", cfg.Database.Host, "port", cfg.Database.Port)
 
+	if err := database.RunMigrations(db); err != nil {
+		log.Error("Failed to run database migrations", "error", err)
+		return fmt.Errorf("failed to run database migrations: %w", err)
+	}
+	log.Info("Database migrations completed successfully")
+
 	// Initialize OAuth server and ensure CLI client exists
 	oauthServer := oauth.NewServer(db, cfg, log.Logger)
 

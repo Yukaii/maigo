@@ -1,8 +1,10 @@
 {{define "oauth/authorize.tmpl"}}
-{{template "layouts/base.tmpl" .}}
+{{template "layouts/base-start" .}}
+{{template "oauth/authorize-content" .}}
+{{template "layouts/base-end" .}}
 {{end}}
 
-{{define "content"}}
+{{define "oauth/authorize-content"}}
     <div class="auth-box">
         <div class="header">
             <div class="header-icon check-icon">✅</div>
@@ -73,7 +75,6 @@
                 <input type="hidden" name="state" value="{{.State}}">
                 <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
                 <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
-                <input type="hidden" name="user_id" value="{{.UserID}}">
                 <input type="hidden" name="action" value="authorize">
                 <button type="submit" class="btn btn-success">
                     ✅ Authorize Application

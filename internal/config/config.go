@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -102,6 +103,8 @@ func Load(configFile ...string) (*Config, error) {
 	// If specific config file is provided, use it
 	if len(configFile) > 0 && configFile[0] != "" {
 		v.SetConfigFile(configFile[0])
+	} else if configPath := os.Getenv("CONFIG_PATH"); configPath != "" {
+		v.SetConfigFile(configPath)
 	} else {
 		// Set configuration name and paths for default search
 		v.SetConfigName("maigo")
@@ -167,9 +170,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.idle_timeout", "120s")
 
 	// OAuth2 defaults
-	v.SetDefault("oauth2.client_id", "maigo_cli")
-	v.SetDefault("oauth2.client_secret", "dev_secret_change_in_production")
-	v.SetDefault("oauth2.redirect_uri", "urn:ietf:wg:oauth:2.0:oob")
+	v.SetDefault("oauth2.client_id", "maigo-cli")
+	v.SetDefault("oauth2.client_secret", "cli-client-secret-not-used-with-pkce")
+	v.SetDefault("oauth2.redirect_uri", "http://localhost:8000/callback")
 
 	// JWT defaults
 	v.SetDefault("jwt.secret", "dev_jwt_secret_change_in_production")
@@ -228,6 +231,7 @@ func bindEnvVars(v *viper.Viper) {
 
 		// Application configuration
 		"BASE_DOMAIN":         "app.base_domain",
+		"APP_TLS":             "app.tls",
 		"SHORT_CODE_LENGTH":   "app.short_code_length",
 		"RATE_LIMIT_REQUESTS": "app.rate_limit.requests",
 		"RATE_LIMIT_WINDOW":   "app.rate_limit.window",
@@ -287,20 +291,26 @@ func (c *Config) DatabaseURL() string {
 		return c.Database.URL
 	}
 
-	// Otherwise, construct URL from individual parameters
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		c.Database.User,
-		c.Database.Password,
-		c.Database.Host,
-		c.Database.Port,
-		c.Database.Name,
-		c.Database.SSLMode,
-	)
+	// Otherwise, construct a URL using net/url so credentials, database names,
+	// and IPv6 hosts are escaped correctly.
+	databaseURL := &url.URL{
+		Scheme:   "postgres",
+		Host:     net.JoinHostPort(c.Database.Host, strconv.Itoa(c.Database.Port)),
+		Path:     "/" + c.Database.Name,
+		RawQuery: url.Values{"sslmode": {c.Database.SSLMode}}.Encode(),
+	}
+	if c.Database.Password == "" {
+		databaseURL.User = url.User(c.Database.User)
+	} else {
+		databaseURL.User = url.UserPassword(c.Database.User, c.Database.Password)
+	}
+
+	return databaseURL.String()
 }
 
 // ServerAddr returns the server address
 func (c *Config) ServerAddr() string {
-	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+	return net.JoinHostPort(c.Server.Host, strconv.Itoa(c.Server.Port))
 }
 
 // ParseDatabaseURL parses DATABASE_URL and populates individual database fields
@@ -312,6 +322,10 @@ func (c *Config) ParseDatabaseURL() error {
 	parsedURL, err := url.Parse(c.Database.URL)
 	if err != nil {
 		return fmt.Errorf("invalid DATABASE_URL format: %w", err)
+	}
+	if (parsedURL.Scheme != "postgres" && parsedURL.Scheme != "postgresql") ||
+		parsedURL.Hostname() == "" || strings.Trim(parsedURL.Path, "/") == "" {
+		return fmt.Errorf("invalid DATABASE_URL format: expected postgres://user:password@host:port/database")
 	}
 
 	populateHost(&c.Database, parsedURL)
