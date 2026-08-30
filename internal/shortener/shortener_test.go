@@ -1,6 +1,7 @@
 package shortener
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,7 +139,7 @@ func TestEncoder_EncodeDecodeRoundtrip(t *testing.T) {
 	testNumbers := []int64{0, 1, 10, 100, 1000, 10000, 123456789}
 
 	for _, num := range testNumbers {
-		t.Run(string(rune(num)), func(t *testing.T) {
+		t.Run(strconv.FormatInt(num, 10), func(t *testing.T) {
 			encoded := encoder.Encode(num)
 			decoded, err := encoder.Decode(encoded)
 			assert.NoError(t, err)
@@ -170,8 +171,9 @@ func TestEncoder_GenerateRandom(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			encoder := NewEncoder(tt.length)
 
-			// Generate multiple codes to test uniqueness
-			codes := make(map[string]bool)
+			// Generate multiple codes to verify the encoder's format contract.
+			// Random generation alone cannot guarantee uniqueness; that contract
+			// belongs to ShortenerService.GenerateShortCode, which checks storage.
 			iterations := 100
 			if tt.length <= 2 {
 				// For very short codes, use fewer iterations to reduce collision chance
@@ -188,11 +190,6 @@ func TestEncoder_GenerateRandom(t *testing.T) {
 					assert.Contains(t, base62Alphabet, string(char))
 				}
 
-				// For short codes, duplicates are expected due to limited space
-				if tt.length > 2 {
-					assert.False(t, codes[code], "Duplicate code generated: %s", code)
-				}
-				codes[code] = true
 			}
 		})
 	}
@@ -390,9 +387,10 @@ func TestSanitizeURL(t *testing.T) {
 			errorContains: "cannot be empty",
 		},
 		{
-			name:     "Whitespace only becomes https://",
-			url:      "   ",
-			expected: "https://",
+			name:          "Whitespace only",
+			url:           "   ",
+			expectedError: true,
+			errorContains: "cannot be empty",
 		},
 		{
 			name:          "Too long URL",
@@ -593,8 +591,9 @@ func BenchmarkEncoder_Decode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		//nolint:errcheck // benchmark doesn't need error checking
-		encoder.Decode(encoded)
+		if _, err := encoder.Decode(encoded); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -603,7 +602,8 @@ func BenchmarkEncoder_GenerateRandom(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		//nolint:errcheck // benchmark doesn't need error checking
-		encoder.GenerateRandom()
+		if _, err := encoder.GenerateRandom(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

@@ -1,50 +1,43 @@
-// Package handlers contains HTTP handlers for Maigo server endpoints.
+// Package handlers contains HTTP handlers for Maigo Core endpoints.
 package handlers
 
 import (
+	"database/sql"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yukaii/maigo/internal/database"
 	"github.com/yukaii/maigo/internal/logger"
 )
 
-// HealthHandler handles health check endpoints
+// HealthHandler handles health check endpoints.
 type HealthHandler struct {
-	db     *pgxpool.Pool
+	db     *sql.DB
 	logger *logger.Logger
 }
 
-// NewHealthHandler creates a new health handler
-func NewHealthHandler(db *pgxpool.Pool, log *logger.Logger) *HealthHandler {
-	return &HealthHandler{
-		db:     db,
-		logger: log,
-	}
+// NewHealthHandler creates a health handler for the SQLite database.
+func NewHealthHandler(db *sql.DB, log *logger.Logger) *HealthHandler {
+	return &HealthHandler{db: db, logger: log}
 }
 
-// HealthCheck provides a basic health check endpoint
+// HealthCheck provides a basic process health check.
 func (h *HealthHandler) HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
 		"service": "maigo",
-		"version": "dev",
-		"message": "Server is healthy and running",
 	})
 }
 
-// ReadinessCheck provides a readiness check that includes database connectivity
+// ReadinessCheck verifies that the SQLite database is reachable.
 func (h *HealthHandler) ReadinessCheck(c *gin.Context) {
-	// Check database health
 	if err := database.Health(h.db); err != nil {
-		h.logger.Error("Database health check failed", "error", err)
+		if h.logger != nil {
+			h.logger.Error("Database health check failed", "error", err)
+		}
 		SendAPIError(c, http.StatusServiceUnavailable, "service_unavailable",
-			"Database health check failed", gin.H{
-				"service":  "maigo",
-				"database": "unhealthy",
-			})
+			"Database health check failed", gin.H{"database": "unhealthy"})
 		return
 	}
 

@@ -1,68 +1,23 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to Maigo are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Added
-- GitHub Actions workflow for automated releases
-- GoReleaser v2 configuration for multi-platform builds
-- Docker image publishing to GitHub Container Registry
-- Linux packages (deb, rpm, apk)
-- Homebrew tap support (optional)
-- Automated changelog generation
-- Comprehensive release documentation
-- MIT License file
+### Maigo Core 1.0
 
-### Changed
-- Separated CI and release workflows for better organization
-- Updated build process to use GoReleaser v2
-- Improved Dockerfile for minimal production images
-- Fixed deprecated GoReleaser configuration fields
-- Moved nfpm postinstall script to external file
+- Reframed the project as a small single-owner self-hosted shortener.
+- Replaced PostgreSQL and external migrations with one SQLite database file
+  initialized on startup.
+- Replaced browser OAuth, users, JWTs, and sessions with one API key.
+- Kept custom aliases, optional expiry, public redirects, lifetime hit counts,
+  list/inspect/stats/delete operations, and a script-friendly CLI.
+- Added a local stdio MCP server with five URL-management tools.
+- Simplified Compose, CI, release metadata, backups, deployment guidance, and
+  the OpenAPI contract around the Core topology.
+- Added self-contained race-enabled SQLite integration coverage.
 
-### Fixed
-- GoReleaser v2 compatibility issues
-- Deprecated configuration warnings
-- NFPM script execution errors
-- Missing LICENSE file in archives
-
-### Developer Experience
-- Added `make validate-release` command
-- Added `make check-goreleaser` for quick validation
-- Added `make release-snapshot` for testing
-- Added `make release-dry` for configuration testing
-- Updated setup process to include GoReleaser
-
-## Release Process
-
-This project uses [GoReleaser](https://goreleaser.com/) for automated releases.
-
-### Creating a Release
-
-1. Update the version and changelog
-2. Create and push a git tag:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-3. GitHub Actions will automatically:
-   - Build binaries for all platforms
-   - Create Docker images
-   - Generate Linux packages
-   - Create a GitHub release with changelog
-
-### Testing Releases
-
-Before creating a tag, test the release process:
-
-```bash
-# Validate configuration
-make validate-release
-
-# Test full build without publishing
-make release-snapshot
-```
+The previous production-hardening implementation remains available on the
+`codex/production-hardening` branch as historical reference. It is not the
+Core runtime.

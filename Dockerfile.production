@@ -1,69 +1,35 @@
-# Production Multi-stage Dockerfile for Maigo
-# Build stage
-FROM golang:1.23-alpine AS builder
+# Production image for Maigo Core. SQLite is pure Go, so the binary is built
+# without CGO and the runtime image only needs certificates, timezone data,
+# and a health-check client.
+FROM golang:1.25-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git make gcc musl-dev
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
-# Set working directory
+RUN apk add --no-cache git
 WORKDIR /build
-
-# Copy go mod files
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
-
-# Copy source code
 COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -trimpath -ldflags="-w -s" -o maigo ./cmd/maigo
 
-# Build the application with optimizations
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -o maigo ./cmd/maigo
+FROM alpine:3.22
 
-# Production stage
-FROM alpine:latest
+RUN apk add --no-cache ca-certificates tzdata wget \
+    && addgroup -S maigo \
+    && adduser -S -G maigo maigo \
+    && mkdir -p /data \
+    && chown -R maigo:maigo /data
 
-# Install runtime dependencies
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    wget \
-    curl
-
-# Create non-root user
-RUN addgroup -g 1000 maigo && \
-    adduser -D -u 1000 -G maigo maigo
-
-# Set working directory
 WORKDIR /app
+COPY --from=builder /build/maigo /usr/local/bin/maigo
+COPY --from=builder /build/maigo.example.yaml ./maigo.example.yaml
 
-# Copy binary from builder
-COPY --from=builder /build/maigo .
-
-# Copy configuration template (will be overridden by environment variables)
-COPY --from=builder /build/config/maigo.yaml ./config/maigo.yaml
-
-# Create necessary directories
-RUN mkdir -p /app/data /app/logs && \
-    chown -R maigo:maigo /app
-
-# Switch to non-root user
 USER maigo
-
-# Expose port
 EXPOSE 8080
-
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Set environment variables
-ENV GIN_MODE=release \
-    LOG_LEVEL=info \
-    LOG_FORMAT=json
-
-# Run the application
-ENTRYPOINT ["/app/maigo"]
+ENTRYPOINT ["/usr/local/bin/maigo"]
 CMD ["server"]

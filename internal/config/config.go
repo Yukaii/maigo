@@ -1,370 +1,218 @@
-// Package config provides configuration management for Maigo.
+// Package config provides the small configuration surface needed by Maigo
+// Core.
 package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/viper"
 )
 
-// Config holds all configuration for our application
+// #nosec G101 -- this is an explicit development-only placeholder; production
+// validation rejects it and deployment examples require replacement.
+const defaultAPIKey = "dev_maigo_api_key_change_me"
+
+// Config contains the runtime configuration for a single-owner Maigo Core
+// installation.
 type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Server   ServerConfig   `mapstructure:"server"`
-	OAuth2   OAuth2Config   `mapstructure:"oauth2"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
+	Auth     AuthConfig     `mapstructure:"auth"`
 	App      AppConfig      `mapstructure:"app"`
 	Log      LogConfig      `mapstructure:"log"`
-	Redis    RedisConfig    `mapstructure:"redis"`
 }
 
-// DatabaseConfig holds database configuration
+// DatabaseConfig selects the SQLite database file.
 type DatabaseConfig struct {
-	// Primary DATABASE_URL (12-factor app style)
-	URL string `mapstructure:"url"`
-
-	// Individual connection parameters (fallback)
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	Name     string `mapstructure:"name"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	SSLMode  string `mapstructure:"ssl_mode"`
-	MaxConns int    `mapstructure:"max_conns"`
-	MaxIdle  int    `mapstructure:"max_idle"`
+	Path string `mapstructure:"path"`
 }
 
-// ServerConfig holds HTTP server configuration
+// ServerConfig controls the HTTP listener.
 type ServerConfig struct {
-	Port         int           `mapstructure:"port"`
-	Host         string        `mapstructure:"host"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
-	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
+	Port         int    `mapstructure:"port"`
+	Host         string `mapstructure:"host"`
+	ReadTimeout  int    `mapstructure:"read_timeout_seconds"`
+	WriteTimeout int    `mapstructure:"write_timeout_seconds"`
+	IdleTimeout  int    `mapstructure:"idle_timeout_seconds"`
 }
 
-// OAuth2Config holds OAuth2 configuration
-type OAuth2Config struct {
-	ClientID     string `mapstructure:"client_id"`
-	ClientSecret string `mapstructure:"client_secret"`
-	RedirectURI  string `mapstructure:"redirect_uri"`
+// AuthConfig contains the one API key used to protect management operations.
+type AuthConfig struct {
+	APIKey string `mapstructure:"api_key"`
 }
 
-// JWTConfig holds JWT configuration
-type JWTConfig struct {
-	Secret     string        `mapstructure:"secret"`
-	Expiration time.Duration `mapstructure:"expiration"`
-}
-
-// AppConfig holds application-specific configuration
+// AppConfig controls public link generation and short-code validation.
 type AppConfig struct {
-	Name            string          `mapstructure:"name"`
-	BaseDomain      string          `mapstructure:"base_domain"`
-	Domain          string          `mapstructure:"domain"`
-	TLS             bool            `mapstructure:"tls"`
-	ShortCodeLength int             `mapstructure:"short_code_length"`
-	RateLimit       RateLimitConfig `mapstructure:"rate_limit"`
-	Debug           bool            `mapstructure:"debug"`
-	CORSEnabled     bool            `mapstructure:"cors_enabled"`
+	Environment     string `mapstructure:"environment"`
+	PublicURL       string `mapstructure:"public_url"`
+	ShortCodeLength int    `mapstructure:"short_code_length"`
+	Debug           bool   `mapstructure:"debug"`
 }
 
-// RateLimitConfig holds rate limiting configuration
-type RateLimitConfig struct {
-	Requests int           `mapstructure:"requests"`
-	Window   time.Duration `mapstructure:"window"`
-}
-
-// LogConfig holds logging configuration
+// LogConfig controls structured application logging.
 type LogConfig struct {
 	Level  string `mapstructure:"level"`
 	Format string `mapstructure:"format"`
 }
 
-// RedisConfig holds Redis configuration
-type RedisConfig struct {
-	Enabled  bool   `mapstructure:"enabled"`
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	Password string `mapstructure:"password"`
-	DB       int    `mapstructure:"db"`
-}
-
-// Load loads configuration from various sources
-// If configFile is provided, it will be used instead of searching default paths
+// Load reads configuration from a YAML file and environment variables.
+// Environment variables take precedence over file values.
 func Load(configFile ...string) (*Config, error) {
 	v := viper.New()
-
-	// If specific config file is provided, use it
 	if len(configFile) > 0 && configFile[0] != "" {
 		v.SetConfigFile(configFile[0])
+	} else if configPath := os.Getenv("CONFIG_PATH"); configPath != "" {
+		v.SetConfigFile(configPath)
 	} else {
-		// Set configuration name and paths for default search
 		v.SetConfigName("maigo")
 		v.SetConfigType("yaml")
 		v.AddConfigPath(".")
 		v.AddConfigPath("$HOME/.maigo")
 	}
 
-	// Set environment variable prefix
 	v.SetEnvPrefix("MAIGO")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	// Set defaults
 	setDefaults(v)
 
-	// Read config file (optional)
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+			return nil, fmt.Errorf("failed to read config: %w", err)
 		}
 	}
-
-	// Bind environment variables
 	bindEnvVars(v)
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-
-	// Parse DATABASE_URL if provided and populate individual fields
-	if err := cfg.ParseDatabaseURL(); err != nil {
-		return nil, fmt.Errorf("failed to parse DATABASE_URL: %w", err)
-	}
-
-	// Validate configuration
-	if err := validateConfig(&cfg); err != nil {
+	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	cfg.App.PublicURL = strings.TrimRight(cfg.App.PublicURL, "/")
 	return &cfg, nil
 }
 
-// setDefaults sets default configuration values
 func setDefaults(v *viper.Viper) {
-	// Database defaults (individual parameters as fallback)
-	v.SetDefault("database.url", "") // DATABASE_URL takes precedence when set
-	v.SetDefault("database.host", "localhost")
-	v.SetDefault("database.port", 5432)
-	v.SetDefault("database.name", "maigo")
-	v.SetDefault("database.user", "postgres")
-	v.SetDefault("database.password", "password")
-	v.SetDefault("database.ssl_mode", "disable")
-	v.SetDefault("database.max_conns", 10)
-	v.SetDefault("database.max_idle", 5)
-
-	// Server defaults
+	v.SetDefault("database.path", "data/maigo.db")
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.host", "127.0.0.1")
-	v.SetDefault("server.read_timeout", "30s")
-	v.SetDefault("server.write_timeout", "30s")
-	v.SetDefault("server.idle_timeout", "120s")
-
-	// OAuth2 defaults
-	v.SetDefault("oauth2.client_id", "maigo_cli")
-	v.SetDefault("oauth2.client_secret", "dev_secret_change_in_production")
-	v.SetDefault("oauth2.redirect_uri", "urn:ietf:wg:oauth:2.0:oob")
-
-	// JWT defaults
-	v.SetDefault("jwt.secret", "dev_jwt_secret_change_in_production")
-	v.SetDefault("jwt.expiration", "24h")
-
-	// Redis defaults
-	v.SetDefault("redis.enabled", false)
-	v.SetDefault("redis.host", "localhost")
-	v.SetDefault("redis.port", 6379)
-	v.SetDefault("redis.password", "")
-	v.SetDefault("redis.db", 0)
-
-	// App defaults
-	v.SetDefault("app.name", "Maigo")
-	v.SetDefault("app.base_domain", "maigo.dev")
-	v.SetDefault("app.domain", "maigo.dev")
-	v.SetDefault("app.tls", false)
+	v.SetDefault("server.read_timeout_seconds", 30)
+	v.SetDefault("server.write_timeout_seconds", 30)
+	v.SetDefault("server.idle_timeout_seconds", 120)
+	v.SetDefault("auth.api_key", defaultAPIKey)
+	v.SetDefault("app.environment", "development")
+	v.SetDefault("app.public_url", "http://127.0.0.1:8080")
 	v.SetDefault("app.short_code_length", 6)
-	v.SetDefault("app.rate_limit.requests", 100)
-	v.SetDefault("app.rate_limit.window", "1h")
 	v.SetDefault("app.debug", false)
-	v.SetDefault("app.cors_enabled", true)
-
-	// Log defaults
 	v.SetDefault("log.level", "info")
-	v.SetDefault("log.format", "json")
+	v.SetDefault("log.format", "text")
 }
 
-// bindEnvVars binds environment variables to configuration keys
 func bindEnvVars(v *viper.Viper) {
-	envVars := map[string]string{
-		// 12-factor DATABASE_URL support (highest priority)
-		"DATABASE_URL": "database.url",
+	bindEnv(v, "database.path", "MAIGO_DATABASE_PATH", "DATABASE_PATH")
+	bindEnv(v, "server.port", "MAIGO_PORT", "PORT")
+	bindEnv(v, "server.host", "MAIGO_HOST", "HOST")
+	bindEnv(v, "auth.api_key", "MAIGO_API_KEY", "API_KEY")
+	bindEnv(v, "app.environment", "MAIGO_APP_ENV", "APP_ENV")
+	bindEnv(v, "app.public_url", "MAIGO_PUBLIC_URL", "PUBLIC_URL")
+	bindEnv(v, "app.short_code_length", "MAIGO_SHORT_CODE_LENGTH", "SHORT_CODE_LENGTH")
+	bindEnv(v, "app.debug", "MAIGO_DEBUG", "DEBUG")
+	bindEnv(v, "log.level", "MAIGO_LOG_LEVEL", "LOG_LEVEL")
+	bindEnv(v, "log.format", "MAIGO_LOG_FORMAT", "LOG_FORMAT")
+}
 
-		// Individual database parameters (12-factor compatible)
-		"DB_HOST":     "database.host",
-		"DB_PORT":     "database.port",
-		"DB_NAME":     "database.name",
-		"DB_USER":     "database.user",
-		"DB_PASSWORD": "database.password",
-		"DB_SSL_MODE": "database.ssl_mode",
-
-		// Server configuration (12-factor compatible)
-		"PORT":      "server.port", // Standard Heroku PORT variable
-		"HTTP_PORT": "server.port", // Alternative naming
-		"HOST":      "server.host",
-
-		// OAuth2 configuration
-		"OAUTH2_CLIENT_ID":     "oauth2.client_id",
-		"OAUTH2_CLIENT_SECRET": "oauth2.client_secret",
-		"OAUTH2_REDIRECT_URI":  "oauth2.redirect_uri",
-
-		// JWT configuration
-		"JWT_SECRET":     "jwt.secret",
-		"JWT_EXPIRATION": "jwt.expiration",
-
-		// Application configuration
-		"BASE_DOMAIN":         "app.base_domain",
-		"SHORT_CODE_LENGTH":   "app.short_code_length",
-		"RATE_LIMIT_REQUESTS": "app.rate_limit.requests",
-		"RATE_LIMIT_WINDOW":   "app.rate_limit.window",
-		"DEBUG":               "app.debug",
-		"CORS_ENABLED":        "app.cors_enabled",
-
-		// Logging configuration
-		"LOG_LEVEL":  "log.level",
-		"LOG_FORMAT": "log.format",
-	}
-
-	for env, key := range envVars {
-		if val := os.Getenv(env); val != "" {
-			v.Set(key, val)
+func bindEnv(v *viper.Viper, key string, names ...string) {
+	for _, name := range names {
+		if value, ok := os.LookupEnv(name); ok && strings.TrimSpace(value) != "" {
+			v.Set(key, value)
+			return
 		}
 	}
 }
 
-// validateConfig validates the configuration
-func validateConfig(cfg *Config) error {
-	// Database validation - either DATABASE_URL or individual parameters required
-	if cfg.Database.URL == "" {
-		if cfg.Database.Host == "" {
-			return fmt.Errorf("database host is required (or set DATABASE_URL)")
-		}
-		if cfg.Database.Name == "" {
-			return fmt.Errorf("database name is required (or set DATABASE_URL)")
-		}
-		if cfg.Database.User == "" {
-			return fmt.Errorf("database user is required (or set DATABASE_URL)")
+func validate(cfg *Config) error {
+	if strings.TrimSpace(cfg.Database.Path) == "" {
+		return fmt.Errorf("database path is required")
+	}
+	if cfg.Database.Path != ":memory:" {
+		if filepath.IsAbs(cfg.Database.Path) && filepath.Dir(cfg.Database.Path) == string(filepath.Separator) {
+			return fmt.Errorf("database path must not be directly under the filesystem root")
 		}
 	}
-
-	if cfg.OAuth2.ClientID == "" {
-		return fmt.Errorf("oauth2 client ID is required")
+	if cfg.Server.Port < 1 || cfg.Server.Port > 65535 {
+		return fmt.Errorf("server port must be between 1 and 65535")
 	}
-	if cfg.OAuth2.ClientSecret == "" {
-		return fmt.Errorf("oauth2 client secret is required")
+	if strings.TrimSpace(cfg.Server.Host) == "" {
+		return fmt.Errorf("server host is required")
 	}
-	if cfg.JWT.Secret == "" {
-		return fmt.Errorf("jwt secret is required")
+	if cfg.Server.ReadTimeout <= 0 || cfg.Server.WriteTimeout <= 0 || cfg.Server.IdleTimeout <= 0 {
+		return fmt.Errorf("server timeouts must be positive")
 	}
-	if cfg.App.BaseDomain == "" {
-		return fmt.Errorf("base domain is required")
+	if strings.TrimSpace(cfg.Auth.APIKey) == "" {
+		return fmt.Errorf("api key is required")
 	}
 	if cfg.App.ShortCodeLength < 3 || cfg.App.ShortCodeLength > 10 {
 		return fmt.Errorf("short code length must be between 3 and 10")
 	}
-
+	if err := validatePublicURL(cfg.App.PublicURL); err != nil {
+		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "production") {
+		if cfg.App.Debug {
+			return fmt.Errorf("debug must be disabled in production")
+		}
+		if len([]byte(cfg.Auth.APIKey)) < 32 || isPlaceholderAPIKey(cfg.Auth.APIKey) {
+			return fmt.Errorf("api key must be a unique secret of at least 32 bytes in production")
+		}
+	}
 	return nil
 }
 
-// DatabaseURL returns the database connection URL
-func (c *Config) DatabaseURL() string {
-	// If DATABASE_URL is set, use it directly (12-factor app style)
-	if c.Database.URL != "" {
-		return c.Database.URL
+// Validate checks a configuration after command-line overrides have been
+// applied. Load calls the same validation automatically.
+func Validate(cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration is required")
 	}
-
-	// Otherwise, construct URL from individual parameters
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		c.Database.User,
-		c.Database.Password,
-		c.Database.Host,
-		c.Database.Port,
-		c.Database.Name,
-		c.Database.SSLMode,
-	)
+	return validate(cfg)
 }
 
-// ServerAddr returns the server address
+func validatePublicURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("public URL must include an HTTP(S) scheme and host")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("public URL scheme must be http or https")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("public URL must not include credentials, query, or fragment")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return fmt.Errorf("public URL must be an origin without a path")
+	}
+	return nil
+}
+
+func isPlaceholderAPIKey(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	return lower == defaultAPIKey || strings.Contains(lower, "change-me") || strings.Contains(lower, "replace")
+}
+
+// ServerAddr returns the HTTP listener address.
 func (c *Config) ServerAddr() string {
-	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+	return net.JoinHostPort(c.Server.Host, strconv.Itoa(c.Server.Port))
 }
 
-// ParseDatabaseURL parses DATABASE_URL and populates individual database fields
-func (c *Config) ParseDatabaseURL() error {
-	if c.Database.URL == "" {
-		return nil // No DATABASE_URL to parse
-	}
-
-	parsedURL, err := url.Parse(c.Database.URL)
-	if err != nil {
-		return fmt.Errorf("invalid DATABASE_URL format: %w", err)
-	}
-
-	populateHost(&c.Database, parsedURL)
-	populatePort(&c.Database, parsedURL)
-	populateName(&c.Database, parsedURL)
-	populateUser(&c.Database, parsedURL)
-	populatePassword(&c.Database, parsedURL)
-	populateSSLMode(&c.Database, parsedURL)
-
-	return nil
-}
-
-func populateHost(db *DatabaseConfig, u *url.URL) {
-	if db.Host == "" && u.Hostname() != "" {
-		db.Host = u.Hostname()
-	}
-}
-
-func populatePort(db *DatabaseConfig, u *url.URL) {
-	if db.Port == 0 && u.Port() != "" {
-		if port, err := strconv.Atoi(u.Port()); err == nil {
-			db.Port = port
-		}
-	}
-}
-
-func populateName(db *DatabaseConfig, u *url.URL) {
-	if db.Name == "" && u.Path != "" {
-		dbName := strings.TrimPrefix(u.Path, "/")
-		if dbName != "" {
-			db.Name = dbName
-		}
-	}
-}
-
-func populateUser(db *DatabaseConfig, u *url.URL) {
-	if db.User == "" && u.User != nil {
-		db.User = u.User.Username()
-	}
-}
-
-func populatePassword(db *DatabaseConfig, u *url.URL) {
-	if db.Password == "" && u.User != nil {
-		if password, ok := u.User.Password(); ok {
-			db.Password = password
-		}
-	}
-}
-
-func populateSSLMode(db *DatabaseConfig, u *url.URL) {
-	if db.SSLMode == "" {
-		if sslMode := u.Query().Get("sslmode"); sslMode != "" {
-			db.SSLMode = sslMode
-		}
-	}
+// ShortURL builds the canonical public link for a short code.
+func (c *Config) ShortURL(shortCode string) string {
+	return strings.TrimRight(c.App.PublicURL, "/") + "/" + shortCode
 }

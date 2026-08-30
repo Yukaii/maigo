@@ -2,109 +2,50 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: "1.25.14"
 
 jobs:
   test:
-    name: Test
+    name: Test and lint
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: password
-          POSTGRES_USER: postgres
-          POSTGRES_DB: maigo_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-    - name: Download dependencies
-      run: go mod download
+      - name: Download dependencies
+        run: go mod download
 
-    - name: Verify dependencies
-      run: go mod verify
+      - name: Verify dependencies
+        run: go mod verify
 
-    - name: Check formatting
-      run: |
-        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-          echo "Code is not formatted. Please run 'make fmt'."
-          gofmt -s -l .
-          exit 1
-        fi
+      - name: Check formatting
+        run: test -z "$(gofmt -s -l $(find . -name '*.go' -not -path './vendor/*'))"
 
-    - name: Install goimports
-      run: go install golang.org/x/tools/cmd/goimports@latest
+      - name: Install goimports
+        run: go install golang.org/x/tools/cmd/goimports@v0.30.0
 
-    - name: Check imports
-      run: |
-        if [ "$(goimports -l . | wc -l)" -gt 0 ]; then
-          echo "Imports are not formatted. Please run 'make fmt'."
-          goimports -l .
-          exit 1
-        fi
+      - name: Check imports
+        run: test -z "$(goimports -l $(find . -name '*.go' -not -path './vendor/*'))"
 
-    - name: Install golangci-lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: latest
-        args: --timeout=5m
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.13.2
+          args: --timeout=5m
 
-    - name: Run unit tests
-      run: go test -v -race -short ./internal/...
+      - name: Run tests
+        run: go test -race ./...
 
-    - name: Set up test environment
-      env:
-        PGPASSWORD: password
-        DATABASE_URL: postgres://postgres:password@localhost:5432/maigo_test?sslmode=disable
-      run: |
-        # Wait for PostgreSQL to be ready
-        timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres; do sleep 1; done'
-
-        # Run migrations
-        go run ./cmd/maigo migrate up
-
-    - name: Run integration tests
-      env:
-        CONFIG_PATH: config/test.yaml
-        DB_HOST: localhost
-        DB_PORT: 5432
-        DB_NAME: maigo_test
-        DB_USER: postgres
-        DB_PASSWORD: password
-        DB_SSL_MODE: disable
-      run: go test -v ./tests/...
-
-    - name: Generate coverage report
-      run: |
-        go test -v -race -coverprofile=coverage.out ./...
-        go tool cover -html=coverage.out -o coverage.html
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.out
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-
+      - name: Build binary
+        run: CGO_ENABLED=0 go build ./cmd/maigo

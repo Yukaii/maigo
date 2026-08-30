@@ -1,157 +1,113 @@
-// Package database manages database connections and migrations for Maigo.
+// Package database manages Maigo Core's embedded SQLite database.
 package database
 
 import (
 	"context"
-	"embed"
+	"database/sql"
 	"fmt"
-	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/postgres"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/lib/pq" // PostgreSQL driver for golang-migrate
+	_ "modernc.org/sqlite"
 
 	"github.com/yukaii/maigo/internal/config"
 )
 
-//go:embed migrations/*.sql
-var migrationFiles embed.FS
+const schema = `
+CREATE TABLE IF NOT EXISTS urls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    short_code TEXT NOT NULL UNIQUE,
+    target_url TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    hits INTEGER NOT NULL DEFAULT 0
+);
 
-// Connect creates a new database connection using config
-func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
-	return NewConnection(cfg.DatabaseURL())
+CREATE INDEX IF NOT EXISTS idx_urls_created_at ON urls (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_urls_expires_at ON urls (expires_at);
+`
+
+const memoryPath = ":memory:"
+
+// Connect opens the configured SQLite database and initializes its schema.
+func Connect(cfg *config.Config) (*sql.DB, error) {
+	return NewConnection(cfg.Database.Path)
 }
 
-// NewConnection creates a new database connection pool
-func NewConnection(databaseURL string) (*pgxpool.Pool, error) {
-	config, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse database URL: %w", err)
+// NewConnection opens a SQLite database at path. Use :memory: for isolated
+// tests; regular deployments should place the file on a persistent volume.
+func NewConnection(path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, fmt.Errorf("database path is required")
+	}
+	if path != memoryPath {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, fmt.Errorf("failed to create database directory: %w", err)
+		}
 	}
 
-	// Configure connection pool for optimal performance
-	// MaxConns: Maximum number of connections in the pool
-	// For a typical web application: (core_count * 2) + effective_spindle_count
-	config.MaxConns = 25
+	dsn := path
+	if path == memoryPath {
+		dsn = "file:maigo-memory?mode=memory&cache=shared"
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+	}
 
-	// MinConns: Minimum number of connections to maintain
-	// Keeps connections warm for faster response times
-	config.MinConns = 5
+	// A single writer connection avoids lock contention for this intentionally
+	// small self-hosted service while WAL still lets readers proceed safely.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
-	// MaxConnLifetime: Maximum lifetime of a connection
-	// Helps with load balancer connection rotation and prevents stale connections
-	config.MaxConnLifetime = time.Hour
-
-	// MaxConnIdleTime: Maximum time a connection can be idle
-	// Closes idle connections to reduce resource usage
-	config.MaxConnIdleTime = time.Minute * 30
-
-	// HealthCheckPeriod: How often to check connection health
-	// Detects and removes broken connections from the pool
-	config.HealthCheckPeriod = time.Minute
-
-	// ConnectTimeout: Maximum time to wait for a new connection
-	config.ConnConfig.ConnectTimeout = 10 * time.Second
-
-	// Create connection pool
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+	if err := db.PingContext(ctx); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to ping SQLite database: %w (close: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+	}
+	if path != memoryPath {
+		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+			if closeErr := db.Close(); closeErr != nil {
+				return nil, fmt.Errorf("failed to enable SQLite WAL mode: %w (close: %v)", err, closeErr)
+			}
+			return nil, fmt.Errorf("failed to enable SQLite WAL mode: %w", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("failed to set SQLite busy timeout: %w (close: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("failed to set SQLite busy timeout: %w", err)
+	}
+	if err := InitializeSchema(ctx, db); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%w (close: %v)", err, closeErr)
+		}
+		return nil, err
 	}
 
-	// Test the connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	slog.Info("Database connection pool initialized",
-		"max_conns", config.MaxConns,
-		"min_conns", config.MinConns,
-		"max_lifetime", config.MaxConnLifetime,
-		"max_idle_time", config.MaxConnIdleTime,
-	)
-
-	return pool, nil
+	return db, nil
 }
 
-// RunMigrations runs database migrations
-func RunMigrations(pool *pgxpool.Pool) error {
-	// Get a single connection for migrations
-	conn, err := pool.Acquire(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to acquire connection: %w", err)
+// InitializeSchema creates the current idempotent Core schema. Core intentionally
+// has one schema bootstrap instead of a migration tool and a migration table.
+func InitializeSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("failed to initialize SQLite schema: %w", err)
 	}
-	defer conn.Release()
-
-	// Convert pgx connection to sql.DB for migrate
-	db := stdlib.OpenDBFromPool(pool)
-	defer func() {
-		if closeErr := db.Close(); closeErr != nil {
-			// Log error but don't fail the migration process
-			fmt.Printf("Warning: failed to close database connection: %v\n", closeErr)
-		}
-	}()
-
-	// Create postgres driver instance
-	driver, err := postgres.WithInstance(db, &postgres.Config{})
-	if err != nil {
-		return fmt.Errorf("failed to create postgres driver: %w", err)
-	}
-
-	// Create migration source from embedded files
-	source, err := iofs.New(migrationFiles, "migrations")
-	if err != nil {
-		return fmt.Errorf("failed to create migration source: %w", err)
-	}
-
-	// Create migrate instance
-	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
-	if err != nil {
-		return fmt.Errorf("failed to create migrate instance: %w", err)
-	}
-
-	// Ensure migrate instance is properly closed
-	defer func() {
-		if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
-			fmt.Printf("Warning: failed to close migrate instance (source: %v, db: %v)\n", sourceErr, dbErr)
-		}
-	}()
-
-	// Run migrations
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("failed to run migrations: %w", err)
-	}
-
-	slog.Info("Database migrations completed successfully")
 	return nil
 }
 
-// GetDB returns a database connection from the pool
-func GetDB(pool *pgxpool.Pool) *pgxpool.Conn {
-	conn, err := pool.Acquire(context.Background())
-	if err != nil {
-		slog.Error("Failed to acquire database connection", "error", err)
-		return nil
-	}
-	return conn
-}
-
-// Health checks the database health
-func Health(pool *pgxpool.Pool) error {
+// Health checks the database connection.
+func Health(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("database ping failed: %w", err)
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("database health check failed: %w", err)
 	}
-
 	return nil
 }
