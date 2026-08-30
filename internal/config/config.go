@@ -59,9 +59,25 @@ type OAuth2Config struct {
 
 // JWTConfig holds JWT configuration
 type JWTConfig struct {
-	Secret     string        `mapstructure:"secret"`
-	Expiration time.Duration `mapstructure:"expiration"`
+	// Secret is the legacy single-key setting. It remains supported for
+	// existing deployments and for validating tokens issued before key IDs were
+	// introduced.
+	Secret string `mapstructure:"secret"`
+	// ActiveKeyID selects the key used to sign newly issued tokens when Keys is
+	// configured.
+	ActiveKeyID string `mapstructure:"active_key_id"`
+	// Keys contains the active key and any retained verification keys.
+	Keys       []JWTKeyConfig `mapstructure:"keys"`
+	Expiration time.Duration  `mapstructure:"expiration"`
 }
+
+// JWTKeyConfig describes one HMAC signing key in the rotation key ring.
+type JWTKeyConfig struct {
+	ID     string `mapstructure:"id"`
+	Secret string `mapstructure:"secret"`
+}
+
+const defaultJWTSecret = "dev_jwt_secret_change_in_production"
 
 // AppConfig holds application-specific configuration
 type AppConfig struct {
@@ -141,12 +157,15 @@ func Load(configFile ...string) (*Config, error) {
 	}
 
 	// Bind environment variables
-	bindEnvVars(v)
+	if err := bindEnvVars(v); err != nil {
+		return nil, fmt.Errorf("failed to bind environment variables: %w", err)
+	}
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	normalizeJWTConfig(&cfg.JWT)
 
 	// Parse DATABASE_URL if provided and populate individual fields
 	if err := cfg.ParseDatabaseURL(); err != nil {
@@ -187,7 +206,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("oauth2.redirect_uri", "http://localhost:8000/callback")
 
 	// JWT defaults
-	v.SetDefault("jwt.secret", "dev_jwt_secret_change_in_production")
+	// The development fallback is applied after unmarshal so an explicit key
+	// ring can omit the legacy secret entirely.
+	v.SetDefault("jwt.secret", "")
 	v.SetDefault("jwt.expiration", "24h")
 
 	// Redis defaults
@@ -225,7 +246,7 @@ func setDefaults(v *viper.Viper) {
 }
 
 // bindEnvVars binds environment variables to configuration keys
-func bindEnvVars(v *viper.Viper) {
+func bindEnvVars(v *viper.Viper) error {
 	envVars := map[string]string{
 		// 12-factor DATABASE_URL support (highest priority)
 		"DATABASE_URL": "database.url",
@@ -249,8 +270,9 @@ func bindEnvVars(v *viper.Viper) {
 		"OAUTH2_REDIRECT_URI":  "oauth2.redirect_uri",
 
 		// JWT configuration
-		"JWT_SECRET":     "jwt.secret",
-		"JWT_EXPIRATION": "jwt.expiration",
+		"JWT_SECRET":        "jwt.secret",
+		"JWT_ACTIVE_KEY_ID": "jwt.active_key_id",
+		"JWT_EXPIRATION":    "jwt.expiration",
 
 		// Redis configuration
 		"REDIS_ENABLED":   "redis.enabled",
@@ -288,6 +310,16 @@ func bindEnvVars(v *viper.Viper) {
 			v.Set(key, val)
 		}
 	}
+
+	if value := os.Getenv("JWT_KEYS"); value != "" {
+		keys, err := parseJWTKeysEnv(value)
+		if err != nil {
+			return fmt.Errorf("invalid JWT_KEYS: %w", err)
+		}
+		v.Set("jwt.keys", keys)
+	}
+
+	return nil
 }
 
 // validateConfig validates the configuration
@@ -341,8 +373,8 @@ func validateApplicationConfig(cfg *Config) error {
 	if cfg.OAuth2.ClientSecret == "" {
 		return fmt.Errorf("oauth2 client secret is required")
 	}
-	if cfg.JWT.Secret == "" {
-		return fmt.Errorf("jwt secret is required")
+	if err := validateJWTConfig(cfg.JWT); err != nil {
+		return err
 	}
 	if err := validateProductionConfig(cfg); err != nil {
 		return err
@@ -361,11 +393,21 @@ func validateProductionConfig(cfg *Config) error {
 	if cfg.App.Debug {
 		return fmt.Errorf("debug must be disabled in production")
 	}
-	if len([]byte(cfg.JWT.Secret)) < 32 {
-		return fmt.Errorf("jwt secret must be at least 32 bytes in production")
-	}
-	if isPlaceholderJWTSecret(cfg.JWT.Secret) {
-		return fmt.Errorf("jwt secret must be replaced with a unique secret in production")
+	if len(cfg.JWT.Keys) == 0 {
+		if err := validateProductionJWTSecret(cfg.JWT.Secret, "jwt secret"); err != nil {
+			return err
+		}
+	} else {
+		for _, key := range cfg.JWT.Keys {
+			if err := validateProductionJWTSecret(key.Secret, fmt.Sprintf("jwt key %q", key.ID)); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(cfg.JWT.Secret) != "" {
+			if err := validateProductionJWTSecret(cfg.JWT.Secret, "legacy jwt secret"); err != nil {
+				return err
+			}
+		}
 	}
 	if isPlaceholderDatabasePassword(databasePasswordForValidation(cfg)) {
 		return fmt.Errorf("database password must be replaced with a unique secret in production")
@@ -375,6 +417,81 @@ func validateProductionConfig(cfg *Config) error {
 	}
 
 	return nil
+}
+
+func validateJWTConfig(jwtConfig JWTConfig) error {
+	if len(jwtConfig.Keys) == 0 {
+		if strings.TrimSpace(jwtConfig.Secret) == "" {
+			return fmt.Errorf("jwt secret or key ring is required")
+		}
+		return nil
+	}
+	if strings.TrimSpace(jwtConfig.ActiveKeyID) == "" {
+		return fmt.Errorf("jwt active key ID is required when a key ring is configured")
+	}
+
+	seen := make(map[string]struct{}, len(jwtConfig.Keys))
+	activeFound := false
+	for index, key := range jwtConfig.Keys {
+		keyID := strings.TrimSpace(key.ID)
+		if keyID == "" {
+			return fmt.Errorf("jwt key %d ID is required", index)
+		}
+		if _, exists := seen[keyID]; exists {
+			return fmt.Errorf("jwt key ID %q is duplicated", keyID)
+		}
+		seen[keyID] = struct{}{}
+		if strings.TrimSpace(key.Secret) == "" {
+			return fmt.Errorf("jwt key %q secret is required", keyID)
+		}
+		if keyID == strings.TrimSpace(jwtConfig.ActiveKeyID) {
+			activeFound = true
+		}
+	}
+	if !activeFound {
+		return fmt.Errorf("jwt active key ID %q is not configured", strings.TrimSpace(jwtConfig.ActiveKeyID))
+	}
+
+	return nil
+}
+
+func validateProductionJWTSecret(secret, name string) error {
+	if len([]byte(secret)) < 32 {
+		return fmt.Errorf("%s must be at least 32 bytes in production", name)
+	}
+	if isPlaceholderJWTSecret(secret) {
+		return fmt.Errorf("%s must be replaced with a unique secret in production", name)
+	}
+
+	return nil
+}
+
+func normalizeJWTConfig(jwtConfig *JWTConfig) {
+	if jwtConfig == nil || len(jwtConfig.Keys) > 0 || strings.TrimSpace(jwtConfig.Secret) != "" {
+		return
+	}
+	jwtConfig.Secret = defaultJWTSecret
+}
+
+func parseJWTKeysEnv(value string) ([]JWTKeyConfig, error) {
+	entries := strings.Split(value, ",")
+	keys := make([]JWTKeyConfig, 0, len(entries))
+	for index, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			return nil, fmt.Errorf("entry %d is empty", index+1)
+		}
+		keyID, secret, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(keyID) == "" || strings.TrimSpace(secret) == "" {
+			return nil, fmt.Errorf("entry %d must use kid=secret format", index+1)
+		}
+		keys = append(keys, JWTKeyConfig{
+			ID:     strings.TrimSpace(keyID),
+			Secret: strings.TrimSpace(secret),
+		})
+	}
+
+	return keys, nil
 }
 
 func validateTrustedProxies(proxies []string) error {
@@ -473,7 +590,9 @@ func isPlaceholderJWTSecret(secret string) bool {
 	switch strings.TrimSpace(strings.ToLower(secret)) {
 	case "dev_jwt_secret_change_in_production",
 		"change-this-in-production",
-		"your-secure-jwt-secret-minimum-32-characters":
+		"your-secure-jwt-secret-minimum-32-characters",
+		"replace-with-a-random-secret-at-least-32-bytes",
+		"retain-until-previous-tokens-expire":
 		return true
 	default:
 		return false

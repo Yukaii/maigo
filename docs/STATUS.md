@@ -33,6 +33,8 @@ CLI/API use. It is not yet a production-ready hosted service.
 - Replaced plaintext password storage/comparison with bcrypt.
 - Added typed HS256 access/refresh tokens, issuer/audience checks, hashed
   refresh sessions, one-time refresh rotation, and real logout/revocation.
+- Added an HMAC signing-key ring with `kid` headers, retained-key verification,
+  and legacy no-`kid` token compatibility for controlled rotation.
 - Restricted redirect URI matching to the registered callback, with only the
   narrow localhost-port variation needed by the CLI.
 - Fixed one-time authorization-code replay handling.
@@ -67,6 +69,9 @@ CLI/API use. It is not yet a production-ready hosted service.
   Multi-device sessions would need a migration and a session-management model.
 - Access JWTs are stateless. Logout immediately revokes refresh sessions, but
   an already-issued access token remains valid until its configured expiry.
+- The rotating key ring is HMAC-based and configuration-distributed; it does
+  not provide a public JWKS endpoint because symmetric signing secrets must not
+  be published.
 - Click recording is synchronous and transactional with the aggregate hit
   update. If the tracking write fails, the redirect still proceeds and the
   event is logged and counted rather than retried through a durable queue.
@@ -87,8 +92,8 @@ CLI/API use. It is not yet a production-ready hosted service.
    across database outages is a hard requirement.
 2. Make Redis or an equivalent edge limiter part of the required topology for
    horizontally scaled deployments, and add per-user/IP policy tests.
-3. Add key rotation/JWK or another managed signing-key strategy before
-   issuing tokens outside a single trusted deployment.
+3. Add a managed secret distribution/control-plane integration for the HMAC
+   key ring before operating many independent deployments.
 4. Decide whether multiple devices are supported, then migrate sessions away
    from the one-row-per-user constraint.
 5. Add HTTP integration coverage for malformed redirects, token algorithms,

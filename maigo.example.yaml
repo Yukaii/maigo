@@ -32,9 +32,18 @@ oauth2:
   redirect_uri: http://localhost:8000/callback
 
 # JWT Configuration
+# Legacy single-key compatibility mode. Remove secret for a fresh key ring;
+# retain the old value while migrating tokens without a key ID.
 jwt:
   secret: dev_jwt_secret_change_in_production
   expiration: 24h
+  # Rotation mode:
+  # active_key_id: primary-2026
+  # keys:
+  #   - id: primary-2026
+  #     secret: replace-with-a-random-secret-at-least-32-bytes
+  #   - id: primary-2025
+  #     secret: retain-until-previous-tokens-expire
 
 # Application Configuration
 app:

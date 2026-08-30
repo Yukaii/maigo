@@ -3,6 +3,7 @@ package config
 import (
 	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -340,6 +341,17 @@ func TestValidateConfigProductionSecuritySettings(t *testing.T) {
 			name: "accepts a strong unique secret",
 		},
 		{
+			name: "accepts a rotating key ring",
+			mutate: func(cfg *Config) {
+				cfg.JWT.Secret = ""
+				cfg.JWT.ActiveKeyID = "primary-2026"
+				cfg.JWT.Keys = []JWTKeyConfig{
+					{ID: "primary-2026", Secret: "a-unique-primary-secret-that-is-long-enough"},
+					{ID: "primary-2025", Secret: "a-unique-previous-secret-that-is-long-enough"},
+				}
+			},
+		},
+		{
 			name: "rejects debug mode",
 			mutate: func(cfg *Config) {
 				cfg.App.Debug = true
@@ -352,6 +364,17 @@ func TestValidateConfigProductionSecuritySettings(t *testing.T) {
 				cfg.JWT.Secret = "short-secret"
 			},
 			errorContains: "at least 32 bytes",
+		},
+		{
+			name: "rejects short rotating key",
+			mutate: func(cfg *Config) {
+				cfg.JWT.Secret = ""
+				cfg.JWT.ActiveKeyID = "primary-2026"
+				cfg.JWT.Keys = []JWTKeyConfig{
+					{ID: "primary-2026", Secret: "short-secret"},
+				}
+			},
+			errorContains: "jwt key \"primary-2026\" must be at least 32 bytes",
 		},
 		{
 			name: "rejects documented placeholder",
@@ -601,10 +624,116 @@ func TestValidateConfigAnalyticsSettings(t *testing.T) {
 	}
 }
 
+func TestParseJWTKeysEnv(t *testing.T) {
+	keys, err := parseJWTKeysEnv("primary=secret-one,previous=secret-two")
+	require.NoError(t, err)
+	assert.Equal(t, []JWTKeyConfig{
+		{ID: "primary", Secret: "secret-one"},
+		{ID: "previous", Secret: "secret-two"},
+	}, keys)
+
+	_, err = parseJWTKeysEnv("primary-secret")
+	assert.Error(t, err)
+	_, err = parseJWTKeysEnv("primary=")
+	assert.Error(t, err)
+}
+
+func TestValidateConfigJWTKeyRingSettings(t *testing.T) {
+	baseConfig := Config{
+		Database: DatabaseConfig{URL: "postgres://user:pass@host:5432/db"},
+		OAuth2:   OAuth2Config{ClientID: "client-id", ClientSecret: "client-secret"},
+		App:      AppConfig{BaseDomain: "example.com", ShortCodeLength: 6},
+	}
+	validKeys := []JWTKeyConfig{
+		{ID: "primary", Secret: "primary-secret"},
+		{ID: "previous", Secret: "previous-secret"},
+	}
+
+	tests := []struct {
+		name          string
+		jwt           JWTConfig
+		errorContains string
+	}{
+		{
+			name: "accepts legacy secret",
+			jwt:  JWTConfig{Secret: "legacy-secret"},
+		},
+		{
+			name: "accepts active key ring",
+			jwt:  JWTConfig{ActiveKeyID: "primary", Keys: validKeys},
+		},
+		{
+			name:          "requires active key ID",
+			jwt:           JWTConfig{Keys: validKeys},
+			errorContains: "active key ID is required",
+		},
+		{
+			name:          "rejects unknown active key ID",
+			jwt:           JWTConfig{ActiveKeyID: "missing", Keys: validKeys},
+			errorContains: "is not configured",
+		},
+		{
+			name: "rejects duplicate key IDs",
+			jwt: JWTConfig{ActiveKeyID: "primary", Keys: []JWTKeyConfig{
+				{ID: "primary", Secret: "primary-secret"},
+				{ID: "primary", Secret: "another-secret"},
+			}},
+			errorContains: "is duplicated",
+		},
+		{
+			name: "rejects empty key secret",
+			jwt: JWTConfig{ActiveKeyID: "primary", Keys: []JWTKeyConfig{
+				{ID: "primary"},
+			}},
+			errorContains: "secret is required",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := baseConfig
+			cfg.JWT = test.jwt
+			err := validateConfig(&cfg)
+			if test.errorContains == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.errorContains)
+		})
+	}
+}
+
+func TestLoadJWTKeyRingFromConfigFile(t *testing.T) {
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("JWT_ACTIVE_KEY_ID", "")
+	t.Setenv("JWT_KEYS", "")
+	configPath := filepath.Join(t.TempDir(), "maigo.yaml")
+	configYAML := []byte(`jwt:
+  active_key_id: primary-2026
+  keys:
+    - id: primary-2026
+      secret: primary-config-secret
+    - id: primary-2025
+      secret: previous-config-secret
+`)
+	require.NoError(t, os.WriteFile(configPath, configYAML, 0o600))
+
+	loaded, err := Load(configPath)
+	require.NoError(t, err)
+	assert.Empty(t, loaded.JWT.Secret)
+	assert.Equal(t, "primary-2026", loaded.JWT.ActiveKeyID)
+	assert.Equal(t, []JWTKeyConfig{
+		{ID: "primary-2026", Secret: "primary-config-secret"},
+		{ID: "primary-2025", Secret: "previous-config-secret"},
+	}, loaded.JWT.Keys)
+}
+
 func TestLoadWithEnvVars(t *testing.T) {
 	// Save original env vars
 	originalVars := make(map[string]string)
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "JWT_ACTIVE_KEY_ID", "JWT_KEYS", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSL_MODE"}
 
 	for _, envVar := range envVars {
 		originalVars[envVar] = os.Getenv(envVar)
@@ -632,6 +761,10 @@ func TestLoadWithEnvVars(t *testing.T) {
 	os.Setenv("PORT", "9090")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("JWT_SECRET", "env-jwt-secret")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("JWT_ACTIVE_KEY_ID", "primary-2026")
+	//nolint:errcheck // test setup doesn't need error checking
+	os.Setenv("JWT_KEYS", "primary-2026=env-primary-secret,primary-2025=env-previous-secret")
 	//nolint:errcheck // test setup doesn't need error checking
 	os.Setenv("DEBUG", "true")
 	//nolint:errcheck // test setup doesn't need error checking
@@ -671,6 +804,11 @@ func TestLoadWithEnvVars(t *testing.T) {
 	assert.Equal(t, "postgres://envuser:envpass@envhost:5433/envdb?sslmode=require", config.Database.URL)
 	assert.Equal(t, 9090, config.Server.Port)
 	assert.Equal(t, "env-jwt-secret", config.JWT.Secret)
+	assert.Equal(t, "primary-2026", config.JWT.ActiveKeyID)
+	assert.Equal(t, []JWTKeyConfig{
+		{ID: "primary-2026", Secret: "env-primary-secret"},
+		{ID: "primary-2025", Secret: "env-previous-secret"},
+	}, config.JWT.Keys)
 	assert.True(t, config.App.Debug)
 	assert.Equal(t, "test", config.App.Environment)
 	assert.Equal(t, "10.0.0.0/8", config.App.TrustedProxies)
@@ -693,7 +831,7 @@ func TestLoadWithEnvVars(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	// Clear environment variables that might interfere
-	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST"}
+	envVars := []string{"DATABASE_URL", "PORT", "JWT_SECRET", "JWT_ACTIVE_KEY_ID", "JWT_KEYS", "DEBUG", "APP_ENV", "TRUSTED_PROXIES", "CORS_ENABLED", "CORS_ORIGINS", "AUTH_RATE_LIMIT_REQUESTS", "AUTH_RATE_LIMIT_WINDOW", "REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB", "REDIS_FAIL_OPEN", "CLICK_EVENT_RETENTION", "CLICK_EVENT_CLEANUP_INTERVAL", "DB_HOST"}
 	originalVars := make(map[string]string)
 
 	for _, envVar := range envVars {
@@ -730,6 +868,8 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "cli-client-secret-not-used-with-pkce", config.OAuth2.ClientSecret)
 
 	assert.Equal(t, "dev_jwt_secret_change_in_production", config.JWT.Secret)
+	assert.Empty(t, config.JWT.ActiveKeyID)
+	assert.Empty(t, config.JWT.Keys)
 	assert.Equal(t, 24*time.Hour, config.JWT.Expiration)
 
 	assert.Equal(t, "Maigo", config.App.Name)

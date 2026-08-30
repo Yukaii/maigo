@@ -111,6 +111,8 @@ Keep the following limitations visible in code and documentation:
 - URL-create rate limiting is process-local and global;
 - the current session schema supports one refresh session per user;
 - access JWTs remain valid until expiry after logout;
+- JWT signing uses a legacy single secret by default, with an optional HMAC
+  key ring and active `kid` for rotation;
 - click-event failures are logged and counted, but not retried through a durable
   outbox;
 - metrics are process-local and reset on restart;

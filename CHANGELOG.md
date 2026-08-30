@@ -16,6 +16,8 @@ All notable changes to Maigo will be documented here. The format follows
   statistics.
 - Added configurable, batched click-event retention and Prometheus-format
   operational counters for redirect and cleanup failures.
+- Added rotating HMAC JWT key-ring support with `kid` headers, retained-key
+  verification, and legacy token compatibility.
 
 ### Added
 
@@ -35,6 +37,7 @@ All notable changes to Maigo will be documented here. The format follows
   out the remaining click-event retention gap.
 - Documented retention settings and private metrics scraping in the deployment
   and API guides.
+- Documented the JWT key-ring rotation sequence and its HMAC/JWKS boundary.
 
 ### Fixed
 

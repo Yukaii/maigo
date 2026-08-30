@@ -47,7 +47,9 @@ services:
       APP_ENV: ${APP_ENV:-development}
 
       # OAuth Configuration
-      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ACTIVE_KEY_ID: ${JWT_ACTIVE_KEY_ID:-}
+      JWT_KEYS: ${JWT_KEYS:-}
       OAUTH2_CLIENT_ID: ${OAUTH2_CLIENT_ID:-maigo-cli}
       OAUTH2_CLIENT_SECRET: ${OAUTH2_CLIENT_SECRET:-cli-client-secret-not-used-with-pkce}
       OAUTH2_REDIRECT_URI: ${OAUTH2_REDIRECT_URI:-http://localhost:8000/callback}

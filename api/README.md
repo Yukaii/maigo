@@ -40,6 +40,12 @@ Access tokens use the configured `JWT_EXPIRATION` (24 hours by default).
 Refresh tokens are rotated and invalidated on logout or revocation; clients
 must persist the newest refresh token after each refresh.
 
+JWT signing supports a rotating HMAC key ring through `JWT_ACTIVE_KEY_ID` and
+`JWT_KEYS`. New tokens carry the active key ID; retain previous keys until the
+longest token lifetime they signed has elapsed. `JWT_SECRET` remains available
+for legacy single-key deployments and migration of tokens without a key ID;
+remove it only after those legacy tokens have expired.
+
 ## URL operations
 
 Create a URL:

@@ -20,6 +20,7 @@ import (
 
 	"github.com/yukaii/maigo/internal/config"
 	"github.com/yukaii/maigo/internal/database/models"
+	"github.com/yukaii/maigo/internal/security/jwtkeys"
 )
 
 // Default CLI client constants - must match CLI package constants
@@ -32,17 +33,28 @@ const (
 
 // Server handles OAuth2 operations
 type Server struct {
-	db     *pgxpool.Pool
-	config *config.Config
-	logger *slog.Logger
+	db      *pgxpool.Pool
+	config  *config.Config
+	logger  *slog.Logger
+	keyRing *jwtkeys.KeyRing
 }
 
 // NewServer creates a new OAuth2 server
 func NewServer(db *pgxpool.Pool, cfg *config.Config, logger *slog.Logger) *Server {
+	var keyRing *jwtkeys.KeyRing
+	if cfg != nil {
+		var err error
+		keyRing, err = jwtkeys.NewKeyRing(cfg.JWT)
+		if err != nil && logger != nil {
+			logger.Error("Invalid JWT key configuration", "error", err)
+		}
+	}
+
 	return &Server{
-		db:     db,
-		config: cfg,
-		logger: logger,
+		db:      db,
+		config:  cfg,
+		logger:  logger,
+		keyRing: keyRing,
 	}
 }
 
@@ -399,8 +411,11 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 	if user == nil || user.ID <= 0 {
 		return nil, fmt.Errorf("cannot issue tokens for an invalid user")
 	}
-	if s.config == nil || s.config.JWT.Secret == "" {
-		return nil, fmt.Errorf("JWT secret is not configured")
+	if s.config == nil {
+		return nil, fmt.Errorf("JWT configuration is not available")
+	}
+	if s.keyRing == nil {
+		return nil, fmt.Errorf("JWT key configuration is invalid")
 	}
 
 	now := time.Now()
@@ -426,8 +441,7 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 		"aud":      "maigo-api",
 	}
 
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
-	accessTokenString, err := accessToken.SignedString([]byte(s.config.JWT.Secret))
+	accessTokenString, err := s.keyRing.Sign(accessClaims)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
 	}
@@ -442,8 +456,7 @@ func (s *Server) GenerateTokenPair(ctx context.Context, user *models.User) (*Tok
 		"iss":     "maigo-oauth2",
 	}
 
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
-	refreshTokenString, err := refreshToken.SignedString([]byte(s.config.JWT.Secret))
+	refreshTokenString, err := s.keyRing.Sign(refreshClaims)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
 	}
@@ -748,12 +761,20 @@ func (s *Server) RevokeTokenString(ctx context.Context, tokenString string) erro
 }
 
 func (s *Server) parseSignedToken(tokenString string) (*jwt.Token, error) {
-	return jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-		if token.Method != jwt.SigningMethodHS256 {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(s.config.JWT.Secret), nil
-	}, jwt.WithIssuer("maigo-oauth2"))
+	if s.keyRing == nil {
+		return nil, fmt.Errorf("JWT key configuration is invalid")
+	}
+
+	return s.keyRing.Parse(tokenString, jwt.WithIssuer("maigo-oauth2"))
+}
+
+// ParseAccessToken validates an access token for the OAuth browser session.
+func (s *Server) ParseAccessToken(tokenString string) (*jwt.Token, error) {
+	if s.keyRing == nil {
+		return nil, fmt.Errorf("JWT key configuration is invalid")
+	}
+
+	return s.keyRing.Parse(tokenString, jwt.WithIssuer("maigo-oauth2"), jwt.WithAudience("maigo-api"))
 }
 
 func claimInt64(value any) (int64, bool) {

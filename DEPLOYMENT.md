@@ -19,8 +19,8 @@ automatically when the application starts.
 
 ~~~bash
 cp .env.production.example .env.production
-# Edit .env.production: set a real DB_PASSWORD and JWT_SECRET at minimum.
-# APP_ENV=production makes startup reject placeholder or short JWT secrets.
+# Edit .env.production: set real database and JWT signing credentials at
+# minimum. APP_ENV=production rejects placeholder or short JWT secrets.
 
 docker compose --env-file .env.production config --quiet
 docker compose --env-file .env.production up -d --build
@@ -80,6 +80,10 @@ BASE_DOMAIN=short.example.com
 APP_TLS=true              # only when HTTPS is provided at the public edge
 JWT_SECRET=<long-random-secret>
 JWT_EXPIRATION=24h
+# Or use a rotating key ring. For an existing deployment, keep the old
+# JWT_SECRET during the migration window; omit it for a fresh key-ring setup:
+# JWT_ACTIVE_KEY_ID=primary-2026
+# JWT_KEYS=primary-2026=<secret>,primary-2025=<secret>
 CORS_ENABLED=false
 CORS_ORIGINS=                 # required if CORS_ENABLED=true
 AUTH_RATE_LIMIT_REQUESTS=20
@@ -111,6 +115,17 @@ APP_ENV=production enables the production configuration checks. The service
 rejects DEBUG=true and known placeholder JWT, database, or Redis secrets in
 that mode. If Redis is enabled, its connection is verified before the HTTP
 listener starts.
+
+JWT signing supports two modes. The legacy `JWT_SECRET` mode remains compatible
+with tokens issued before key IDs. For a fresh key-ring deployment, leave
+`JWT_SECRET` empty, set `JWT_ACTIVE_KEY_ID`, and provide every active key in
+`JWT_KEYS` as comma-separated `kid=secret` entries. To rotate an existing
+deployment, keep its old `JWT_SECRET`, add the new key ring, deploy the new
+active key to every replica, and switch `JWT_ACTIVE_KEY_ID`. Remove the old
+key-ring entry and legacy `JWT_SECRET` only after the longest access/refresh
+token lifetime they signed has elapsed. Every replica must receive the same
+key ring. These are HMAC secrets, so Maigo does not expose them through a JWKS
+endpoint.
 
 Configuration precedence and all supported variables are documented in the
 README and maigo.example.yaml.

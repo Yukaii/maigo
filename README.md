@@ -32,6 +32,13 @@ database migrations on startup. The default Compose database is suitable for
 local development only. Change `JWT_SECRET` and database credentials before
 using the service anywhere shared.
 
+For production token signing, the legacy `JWT_SECRET` setting remains
+compatible. For rotation, configure `JWT_ACTIVE_KEY_ID` and a comma-separated
+`JWT_KEYS` key ring (`kid=secret` entries); retain the previous key until all
+tokens signed with it have expired. When migrating an existing deployment,
+keep the old `JWT_SECRET` set until its no-`kid` tokens have expired, then
+remove it.
+
 ## CLI
 
 ```bash

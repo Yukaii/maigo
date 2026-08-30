@@ -10,10 +10,19 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/yukaii/maigo/internal/config"
+	"github.com/yukaii/maigo/internal/security/jwtkeys"
 )
 
 // Auth is a middleware that validates JWT tokens
 func Auth(cfg *config.Config) gin.HandlerFunc {
+	var keyRing *jwtkeys.KeyRing
+	var keyRingErr error
+	if cfg == nil {
+		keyRingErr = fmt.Errorf("jwt configuration is not available")
+	} else {
+		keyRing, keyRingErr = jwtkeys.NewKeyRing(cfg.JWT)
+	}
+
 	return func(c *gin.Context) {
 		tokenString, err := extractBearerToken(c)
 		if err != nil {
@@ -21,7 +30,12 @@ func Auth(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		token, err := validateJWTToken(tokenString, cfg.JWT.Secret)
+		if keyRingErr != nil {
+			respondUnauthorized(c, "Invalid or expired token")
+			return
+		}
+
+		token, err := validateJWTToken(tokenString, keyRing)
 		if err != nil {
 			respondUnauthorized(c, "Invalid or expired token")
 			return
@@ -59,13 +73,8 @@ func extractBearerToken(c *gin.Context) (string, error) {
 	return parts[1], nil
 }
 
-func validateJWTToken(tokenString, secret string) (*jwt.Token, error) {
-	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodHS256 {
-			return nil, jwt.ErrSignatureInvalid
-		}
-		return []byte(secret), nil
-	}, jwt.WithIssuer("maigo-oauth2"), jwt.WithAudience("maigo-api"))
+func validateJWTToken(tokenString string, keyRing *jwtkeys.KeyRing) (*jwt.Token, error) {
+	return keyRing.Parse(tokenString, jwt.WithIssuer("maigo-oauth2"), jwt.WithAudience("maigo-api"))
 }
 
 func respondUnauthorized(c *gin.Context, message string) {

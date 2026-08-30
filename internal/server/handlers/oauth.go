@@ -256,12 +256,7 @@ func (h *OAuthHandler) renderAuthorizationPage(c *gin.Context, req *oauth.Author
 
 // extractUserIDFromToken extracts user ID from an access token
 func (h *OAuthHandler) extractUserIDFromToken(tokenString string) (int64, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-		if token.Method != jwt.SigningMethodHS256 {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(h.config.JWT.Secret), nil
-	}, jwt.WithIssuer("maigo-oauth2"), jwt.WithAudience("maigo-api"))
+	token, err := h.oauthServer.ParseAccessToken(tokenString)
 
 	if err != nil {
 		return 0, err
